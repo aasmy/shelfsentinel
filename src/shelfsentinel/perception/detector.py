@@ -23,12 +23,13 @@ class Person:
 
 
 class PoseDetector:
-    def __init__(self, model="yolo11n-pose.pt", tracker="bytetrack.yaml", conf=0.4):
+    def __init__(self, model="yolo11n-pose.pt", tracker="bytetrack.yaml", conf=0.4, keypoint_conf=0.5):
         from ultralytics import YOLO
 
         self.model = YOLO(model)
         self.tracker = tracker
         self.conf = conf
+        self.keypoint_conf = keypoint_conf
 
     def track(self, video_path):
         # yields the raw yolo result for every frame, ids stay the same across frames
@@ -41,3 +42,24 @@ class PoseDetector:
             classes=[0],  # people only
             verbose=False,
         )
+
+    def get_people(self, result, t):
+        # turns one yolo result into a list of Person
+        boxes = result.boxes
+        if boxes is None or boxes.id is None:  # nobody tracked in this frame
+            return []
+
+        ids = boxes.id.int().tolist()
+        bboxes = boxes.xyxy.tolist()
+        kp_xy = result.keypoints.xy.tolist()
+        kp_conf = result.keypoints.conf.tolist()
+
+        people = []
+        for i, track_id in enumerate(ids):
+            keypoints = {}
+            for name, idx in KEYPOINTS.items():
+                if kp_conf[i][idx] >= self.keypoint_conf:  # skip points yolo isnt sure about
+                    keypoints[name] = [round(v, 1) for v in kp_xy[i][idx]]
+            bbox = [round(v, 1) for v in bboxes[i]]
+            people.append(Person(track_id, round(t, 3), bbox, keypoints))
+        return people
