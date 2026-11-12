@@ -2,8 +2,12 @@
 import cv2
 import argparse
 import numpy as np
+import sys
+from pathlib import Path
 
-from zones import save_zones
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from shelfsentinel.perception.zones import save_zones
 
 
 # The zones we want to draw, in order
