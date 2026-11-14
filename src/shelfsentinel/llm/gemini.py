@@ -10,6 +10,10 @@ from google.genai import errors, types
 load_dotenv()  # reads GEMINI_API_KEY from .env
 
 
+class DailyLimitError(Exception):
+    pass
+
+
 class Gemini:
     def __init__(self, model=None):
         api_key = os.getenv("GEMINI_API_KEY")
@@ -36,11 +40,13 @@ class Gemini:
         config = types.GenerateContentConfig(response_mime_type="application/json")  # ask for json back
         try:
             response = self.client.models.generate_content(model=self.model, contents=parts, config=config)
-        except errors.ClientError as e:
-            if e.code != 429:
+        except errors.APIError as e:
+            if e.code == 429 and "per day" in str(e):
+                raise DailyLimitError(str(e))  # no point retrying, quota resets tomorrow
+            if e.code not in (429, 503):
                 raise
-            # free tier has a per minute limit, wait it out and try once more
-            print("  rate limited, waiting 60s...")
+            # 429 = per minute limit, 503 = model is busy. both go away if we wait a bit
+            print(f"  gemini said {e.code}, waiting 60s and trying again...")
             time.sleep(60)
             response = self.client.models.generate_content(model=self.model, contents=parts, config=config)
         return json.loads(response.text)

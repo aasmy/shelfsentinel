@@ -78,7 +78,7 @@ def main():
 
     gemini = None
     if not args.no_llm:
-        from shelfsentinel.llm.gemini import Gemini
+        from shelfsentinel.llm.gemini import DailyLimitError, Gemini
 
         gemini = Gemini()
 
@@ -95,9 +95,12 @@ def main():
                 prompt = PROMPT.format(n=len(frames), times=case["frame_times"])
                 try:
                     case["llm"] = gemini.ask_with_images(prompt, [fr for _, fr in frames])
+                except DailyLimitError:
+                    print("daily gemini limit reached, saving the rest without llm results")
+                    gemini = None
                 except Exception as e:  # keep going if one call fails
                     case["llm_error"] = str(e)
-                print(f"{m['t']:6.1f}s  track {m['track_id']}  ->  {case.get('llm', case.get('llm_error'))}")
+                print(f"{m['t']:6.1f}s  track {m['track_id']}  ->  {case.get('llm', case.get('llm_error', 'skipped'))}")
 
             f.write(json.dumps(case) + "\n")
 
