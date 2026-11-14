@@ -3,3 +3,5 @@ lap
 opencv-python
 numpy
 pyyaml
+google-genai
+python-dotenv
