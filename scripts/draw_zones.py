@@ -13,7 +13,9 @@ from shelfsentinel.perception.zones import save_zones
 # The zones we want to draw, in order
 ZONE_NAMES = ["shelf", "counter", "exit"]
 
-# Stores completed polygons
+MAX_DISPLAY_WIDTH = 1200
+MAX_DISPLAY_HEIGHT = 800
+
 zones = {}
 
 # Points currently being drawn
@@ -24,17 +26,28 @@ current_zone_index = 0
 
 # Current mouse position (for preview)
 mouse_position = None
+display_scale = 1.0
 
 
 def mouse_callback(event, x, y, flags, param):
-    """Handle mouse clicks when drawing a polygon."""
+    """Handle mouse clicks, converting display coordinates to video coordinates."""
     global current_points, mouse_position
 
-    mouse_position = (x, y)
+    # Convert coordinates back to original video resolution
+    original_x = round(x / display_scale)
+    original_y = round(y / display_scale)
+
+    mouse_position = (original_x, original_y)
 
     if event == cv2.EVENT_LBUTTONDOWN:
-        current_points.append((x, y))
-        print(f"Added point: ({x}, {y})")
+        current_points.append((original_x, original_y))
+        print(f"Added point: ({original_x}, {original_y})")
+
+
+def scale_point(point):
+    """Convert original video coordinates to display coordinates."""
+    x, y = point
+    return (round(x * display_scale), round(y * display_scale))
 
 
 def draw_interface(frame):
@@ -43,7 +56,7 @@ def draw_interface(frame):
 
     # Draw completed zones
     for zone_name, polygon in zones.items():
-        points = [(int(x), int(y)) for x, y in polygon]
+        points = [scale_point(point) for point in polygon]
 
         cv2.polylines(
             display,
@@ -64,16 +77,19 @@ def draw_interface(frame):
             2
         )
 
-    # Draw current points and connecting lines
-    for point in current_points:
+    # Draw current points
+    display_points = [scale_point(point) for point in current_points]
+
+    for point in display_points:
         cv2.circle(display, point, 5, (0, 0, 255), -1)
 
-    if len(current_points) > 1:
-        for i in range(len(current_points) - 1):
+    # Draw connecting lines
+    if len(display_points) > 1:
+        for i in range(len(display_points) - 1):
             cv2.line(
                 display,
-                current_points[i],
-                current_points[i + 1],
+                display_points[i],
+                display_points[i + 1],
                 (0, 0, 255),
                 2
             )
@@ -82,16 +98,15 @@ def draw_interface(frame):
     if current_points and mouse_position:
         cv2.line(
             display,
-            current_points[-1],
-            mouse_position,
+            scale_point(current_points[-1]),
+            scale_point(mouse_position),
             (255, 0, 0),
             1
         )
 
     # Instructions
     if current_zone_index < len(ZONE_NAMES):
-        current_name = ZONE_NAMES[current_zone_index]
-        instruction = f"Drawing: {current_name}"
+        instruction = f"Drawing: {ZONE_NAMES[current_zone_index]}"
     else:
         instruction = "All zones completed! Press S to save."
 
@@ -128,8 +143,8 @@ def draw_interface(frame):
     return display
 
 
-def main(video_path):
-    global current_points, current_zone_index
+def main(video_path, output_path):
+    global current_points, current_zone_index, display_scale
 
     # Open video
     video = cv2.VideoCapture(video_path)
@@ -146,9 +161,32 @@ def main(video_path):
         print("Error: Could not read a frame from the video.")
         return
 
+    # Calculate display scale while preserving aspect ratio
+    height, width = frame.shape[:2]
+
+    display_scale = min(
+        MAX_DISPLAY_WIDTH / width,
+        MAX_DISPLAY_HEIGHT / height,
+        1.0
+    )
+
+    display_width = round(width * display_scale)
+    display_height = round(height * display_scale)
+
+    print(f"Original video resolution: {width}x{height}")
+    print(f"Display resolution: {display_width}x{display_height}")
+    print(f"Display scale: {display_scale:.3f}")
+
+    # Resize only for display. Original coordinates are preserved.
+    display_frame = cv2.resize(
+        frame,
+        (display_width, display_height),
+        interpolation=cv2.INTER_AREA
+    )
+
     window_name = "ShelfSentinel Zone Drawing"
 
-    cv2.namedWindow(window_name)
+    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     cv2.setMouseCallback(window_name, mouse_callback)
 
     print("\nShelfSentinel Zone Drawing")
@@ -157,7 +195,7 @@ def main(video_path):
     print("Press ENTER when you have at least 3 points.\n")
 
     while True:
-        display = draw_interface(frame)
+        display = draw_interface(display_frame)
 
         cv2.imshow(window_name, display)
 
@@ -198,8 +236,12 @@ def main(video_path):
                 print("Please finish all three zones before saving.")
                 continue
 
-            save_zones(zones, "./configs/zones.yaml")
-            print("Zones saved to ./configs/zones.yaml!")
+            output = Path(output_path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+
+            save_zones(zones, str(output))
+
+            print(f"Zones saved to {output}!")
             break
 
         # Quit without saving
@@ -220,6 +262,12 @@ if __name__ == "__main__":
         help="Path to the video file"
     )
 
+    parser.add_argument(
+        "--output",
+        default="configs/zones.yaml",
+        help="Output path for zones.yaml"
+    )
+
     args = parser.parse_args()
 
-    main(args.video)
+    main(args.video, args.output)
