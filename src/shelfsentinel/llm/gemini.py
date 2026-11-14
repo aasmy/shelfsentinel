@@ -15,7 +15,8 @@ class Gemini:
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is missing, add it to .env")
 
-        self.client = genai.Client(api_key=api_key)
+        # json mode only works on v1beta, the sdk defaults to v1
+        self.client = genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version="v1beta"))
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     def ask(self, prompt):
