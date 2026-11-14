@@ -6,6 +6,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -56,6 +57,7 @@ def main():
     parser.add_argument("--out", default="runs")
     parser.add_argument("--max-calls", type=int, default=5, help="max gemini calls per run, to save quota")
     parser.add_argument("--no-llm", action="store_true")
+    parser.add_argument("--delay", type=float, default=13, help="seconds between gemini calls (free tier is 5 per minute)")
     args = parser.parse_args()
 
     zones = load_zones(args.zones)
@@ -88,6 +90,8 @@ def main():
             case["frame_times"] = [ft for ft, _ in frames]
 
             if gemini and i < args.max_calls:
+                if i > 0:
+                    time.sleep(args.delay)
                 prompt = PROMPT.format(n=len(frames), times=case["frame_times"])
                 try:
                     case["llm"] = gemini.ask_with_images(prompt, [fr for _, fr in frames])

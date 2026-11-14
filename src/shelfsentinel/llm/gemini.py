@@ -1,10 +1,11 @@
 import json
 import os
+import time
 
 import cv2
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 load_dotenv()  # reads GEMINI_API_KEY from .env
 
@@ -32,9 +33,14 @@ class Gemini:
                 parts.append(types.Part.from_bytes(data=jpg.tobytes(), mime_type="image/jpeg"))
         parts.append(prompt)
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=parts,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),  # ask for json back
-        )
+        config = types.GenerateContentConfig(response_mime_type="application/json")  # ask for json back
+        try:
+            response = self.client.models.generate_content(model=self.model, contents=parts, config=config)
+        except errors.ClientError as e:
+            if e.code != 429:
+                raise
+            # free tier has a per minute limit, wait it out and try once more
+            print("  rate limited, waiting 60s...")
+            time.sleep(60)
+            response = self.client.models.generate_content(model=self.model, contents=parts, config=config)
         return json.loads(response.text)
