@@ -1,3 +1,5 @@
-pyyaml
+ultralytics
+lap
 opencv-python
 numpy
+pyyaml
