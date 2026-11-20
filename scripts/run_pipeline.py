@@ -14,7 +14,8 @@ import cv2
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from shelfsentinel.frames import get_frames
 from shelfsentinel.perception.detector import PoseDetector
-from shelfsentinel.perception.zones import load_zones, point_in_polygon
+from shelfsentinel.perception.events import ShelfEventDetector
+from shelfsentinel.perception.zones import load_zones
 
 PROMPT = (
     "These are {n} frames from a store camera, in order, taken at {times} seconds. "
@@ -26,23 +27,23 @@ PROMPT = (
 
 
 def find_shelf_moments(detector, video_path, shelf, fps, min_frames=3, cooldown=3.0):
-    # temporary simple version of hand_reach_shelf until events.py is ready
-    # a moment = a wrist stays inside the shelf zone for min_frames frames in a row
-    streak = {}  # track_id -> frames in a row with a wrist in the shelf
-    last = {}  # track_id -> time of their last moment, so we dont spam the same reach
+    event_detector = ShelfEventDetector(
+        shelf,
+        min_frames=min_frames,
+        suppression_seconds=cooldown,
+    )
     moments = []
-
     for frame, result in enumerate(detector.track(video_path)):
         t = frame / fps
         for p in detector.get_people(result, t):
-            wrists = [p.keypoints[w] for w in ("l_wrist", "r_wrist") if w in p.keypoints]
-            in_shelf = any(point_in_polygon(w, shelf) for w in wrists)
-            streak[p.track_id] = streak.get(p.track_id, 0) + 1 if in_shelf else 0
-
-            if streak[p.track_id] == min_frames and t - last.get(p.track_id, -999) > cooldown:
-                last[p.track_id] = t
-                moments.append({"track_id": p.track_id, "event": "hand_reach_shelf", "t": round(t, 2)})
-                print(f"{t:6.1f}s  track {p.track_id}  hand_reach_shelf")
+            for event in event_detector.update(p, round(t, 3)):
+                moment = dict(event)
+                moment["t"] = round(event["timestamp"], 2)
+                moments.append(moment)
+                print(
+                    f"{moment['t']:6.1f}s  track {moment['track_id']} "
+                    f"{moment['event']} llm_call={moment['llm_call']}"
+                )
 
         if frame % 300 == 0:
             print(f"... {t:.0f}s")
@@ -83,16 +84,18 @@ def main():
         gemini = Gemini()
 
     print("2) asking gemini" if gemini else "2) skipping gemini (--no-llm)")
+    llm_calls = 0
     with open(out_file, "w") as f:
         for i, m in enumerate(moments):
             case = dict(m)
             frames = get_frames(args.video, m["t"])
             case["frame_times"] = [ft for ft, _ in frames]
 
-            if gemini and i < args.max_calls:
-                if i > 0:
+            if gemini and m["llm_call"] and llm_calls < args.max_calls:
+                if llm_calls > 0:
                     time.sleep(args.delay)
                 prompt = PROMPT.format(n=len(frames), times=case["frame_times"])
+                llm_calls += 1
                 try:
                     case["llm"] = gemini.ask_with_images(prompt, [fr for _, fr in frames])
                 except DailyLimitError:
