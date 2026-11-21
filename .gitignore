@@ -13,3 +13,4 @@ runs/
 *.mov
 *.pt
 *.db
+configs/saved_zones_yamls/*.yaml

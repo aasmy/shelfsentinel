@@ -123,8 +123,9 @@ class ShelfEventDetector:
         if inside:
             state["seen_in_exit"] = True
             state["disappeared_since"] = None
-        elif state["seen_in_exit"]:
-            # Reappearance outside the exit cancels the pending exit.
+        elif state["seen_in_exit"] and state["disappeared_since"] is not None:
+            # The track returned during the grace period outside the exit:
+            # cancel the pending exit rather than confirming it.
             state["seen_in_exit"] = False
             state["disappeared_since"] = None
         return []
