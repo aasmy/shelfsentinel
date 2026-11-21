@@ -26,24 +26,35 @@ PROMPT = (
 )
 
 
-def find_shelf_moments(detector, video_path, shelf, fps, min_frames=3, cooldown=3.0):
+def find_shelf_moments(
+    detector,
+    video_path,
+    shelf,
+    fps,
+    counter_polygon=None,
+    exit_polygon=None,
+    min_frames=3,
+    cooldown=3.0,
+):
     event_detector = ShelfEventDetector(
         shelf,
+        counter_polygon=counter_polygon,
+        exit_polygon=exit_polygon,
         min_frames=min_frames,
         suppression_seconds=cooldown,
     )
     moments = []
     for frame, result in enumerate(detector.track(video_path)):
         t = frame / fps
-        for p in detector.get_people(result, t):
-            for event in event_detector.update(p, round(t, 3)):
-                moment = dict(event)
-                moment["t"] = round(event["timestamp"], 2)
-                moments.append(moment)
-                print(
-                    f"{moment['t']:6.1f}s  track {moment['track_id']} "
-                    f"{moment['event']} llm_call={moment['llm_call']}"
-                )
+        people = detector.get_people(result, t)
+        for event in event_detector.process_frame(people, round(t, 3)):
+            moment = dict(event)
+            moment["t"] = round(event["timestamp"], 2)
+            moments.append(moment)
+            print(
+                f"{moment['t']:6.1f}s  track {moment['track_id']} "
+                f"{moment['event']} llm_call={moment['llm_call']}"
+            )
 
         if frame % 300 == 0:
             print(f"... {t:.0f}s")
@@ -69,8 +80,15 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     cap.release()
 
-    print("1) finding hand on shelf moments")
-    moments = find_shelf_moments(PoseDetector(), args.video, zones["shelf"], fps)
+    print("finding events:")
+    moments = find_shelf_moments(
+        PoseDetector(),
+        args.video,
+        zones["shelf"],
+        fps,
+        counter_polygon=zones.get("counter"),
+        exit_polygon=zones.get("exit"),
+    )
     print(f"found {len(moments)} moments\n")
 
     out_dir = Path(args.out) / Path(args.video).stem

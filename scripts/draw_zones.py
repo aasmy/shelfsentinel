@@ -1,3 +1,4 @@
+# run with python [path to draw_zones.py] [path to your video]
 
 import cv2
 import argparse
