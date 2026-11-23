@@ -16,6 +16,7 @@ from shelfsentinel.frames import get_keyframes, reach_window
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.events import ShelfEventDetector
 from shelfsentinel.perception.zones import load_zones
+from shelfsentinel.privacy.blur import blur_faces
 
 PROMPT = (
     "These are {n} frames from a store camera, in order, taken at {times} seconds. "
@@ -99,7 +100,7 @@ def main():
                 prompt = PROMPT.format(n=len(frames), times=case["frame_times"])
                 llm_calls += 1
                 try:
-                    case["llm"] = gemini.ask_with_images(prompt, [fr for _, fr in frames])
+                    case["llm"] = gemini.ask_with_images(prompt, [blur_faces(fr) for _, fr in frames])
                 except DailyLimitError:
                     print("daily gemini limit reached, saving the rest without llm results")
                     gemini = None
