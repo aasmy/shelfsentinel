@@ -15,11 +15,144 @@ except ImportError:
 class ShelfEventDetector:
     """Stateful hand reach/leave detector for one or more tracked people."""
 
-    def __init__(self, shelf_polygon, min_frames=3, suppression_seconds=3.0):
+    def __init__(
+        self,
+        shelf_polygon,
+        counter_polygon=None,
+        exit_polygon=None,
+        min_frames=3,
+        suppression_seconds=3.0,
+    ):
         self.shelf_polygon = shelf_polygon
+        self.counter_polygon = counter_polygon
+        self.exit_polygon = exit_polygon
         self.min_frames = min_frames
         self.suppression_seconds = suppression_seconds
         self.states = {}
+        self.counter_states = {}
+        self.exit_states = {}
+
+    def process_frame(self, people, timestamp):
+        """Process shelf, counter, and exit state for one complete frame."""
+        events = []
+        present_ids = set()
+
+        for person in people:
+            if hasattr(person, "to_dict"):
+                person = person.to_dict()
+
+            track_id = person["track_id"]
+            present_ids.add(track_id)
+
+            events.extend(self.update(person, timestamp) or [])
+            events.extend(self._update_counter(track_id, person, timestamp))
+            events.extend(self._update_exit_presence(track_id, person, timestamp))
+
+        events.extend(self._update_exit_disappearance(present_ids, timestamp))
+        return events
+
+    def end_frame(self, people, timestamp):
+        """Compatibility alias for processing all per-frame events."""
+        return self.process_frame(people, timestamp)
+
+    @staticmethod
+    def person_bottom_center(person):
+        """Return the bottom-center point of a person's bounding box."""
+        bbox = person.get("bbox")
+        if not bbox or len(bbox) < 4:
+            return None
+        x1, _, x2, y2 = bbox
+        return [(x1 + x2) / 2, y2]
+
+    def person_in_zone(self, person, zone_polygon):
+        """Return whether a person's bottom-center is inside a zone."""
+        if zone_polygon is None:
+            return False
+        point = self.person_bottom_center(person)
+        if point is None:
+            return False
+        return point_in_polygon(point, zone_polygon)
+
+    def _update_counter(self, track_id, person, timestamp):
+        if self.counter_polygon is None:
+            return []
+
+        inside = self.person_in_zone(person, self.counter_polygon)
+        state = self.counter_states.setdefault(track_id, {
+            "inside": False,
+            "entered_at": None,
+            "reported": False,
+        })
+
+        if inside:
+            if not state["inside"]:
+                state["inside"] = True
+                state["entered_at"] = timestamp
+                state["reported"] = False
+            elif (
+                not state["reported"]
+                and timestamp - state["entered_at"] >= 2.0
+            ):
+                state["reported"] = True
+                return [{
+                    "track_id": track_id,
+                    "event": "at_counter",
+                    "timestamp": round(timestamp, 3),
+                    "llm_call": False,
+                }]
+        else:
+            state["inside"] = False
+            state["entered_at"] = None
+            state["reported"] = False
+        return []
+
+    def _update_exit_presence(self, track_id, person, timestamp):
+        if self.exit_polygon is None:
+            return []
+
+        inside = self.person_in_zone(person, self.exit_polygon)
+        state = self.exit_states.setdefault(track_id, {
+            "seen_in_exit": False,
+            "disappeared_since": None,
+            "exited": False,
+        })
+
+        if state["exited"]:
+            return []
+
+        if inside:
+            state["seen_in_exit"] = True
+            state["disappeared_since"] = None
+        elif state["seen_in_exit"] and state["disappeared_since"] is not None:
+            # The track returned during the grace period outside the exit:
+            # cancel the pending exit rather than confirming it.
+            state["seen_in_exit"] = False
+            state["disappeared_since"] = None
+        return []
+
+    def _update_exit_disappearance(self, present_ids, timestamp):
+        if self.exit_polygon is None:
+            return []
+
+        events = []
+        for track_id, state in self.exit_states.items():
+            if state["exited"] or not state["seen_in_exit"]:
+                continue
+
+            if track_id in present_ids:
+                continue
+
+            if state["disappeared_since"] is None:
+                state["disappeared_since"] = timestamp
+            elif timestamp - state["disappeared_since"] >= 2.0:
+                state["exited"] = True
+                events.append({
+                    "track_id": track_id,
+                    "event": "person_exited",
+                    "timestamp": round(timestamp, 3),
+                    "llm_call": False,
+                })
+        return events
 
     def update(self, person, timestamp):
         """Return a newly emitted event, or a list of events, for this person frame."""
@@ -138,7 +271,11 @@ def process_video(people_path, zones_path, output_path):
 
     shelf_polygon = zones["shelf"]
 
-    detector = ShelfEventDetector(shelf_polygon)
+    detector = ShelfEventDetector(
+        shelf_polygon,
+        counter_polygon=zones.get("counter"),
+        exit_polygon=zones.get("exit"),
+    )
     events = []
 
     # Read one JSON object per line.
@@ -153,15 +290,15 @@ def process_video(people_path, zones_path, output_path):
             timestamp = frame_data["t"]
 
             # Process every person detected in this frame.
-            for person in frame_data.get("people", []):
-                for event in detector.update(person, timestamp):
-                    events.append(event)
-                    print(
-                        f"[{event['timestamp']:.3f}s] "
-                        f"Person {event['track_id']}: "
-                        f"{event['event']} "
-                        f"llm_call={event['llm_call']}"
-                    )
+            people = frame_data.get("people", [])
+            for event in detector.process_frame(people, timestamp):
+                events.append(event)
+                print(
+                    f"[{event['timestamp']:.3f}s] "
+                    f"Person {event['track_id']}: "
+                    f"{event['event']} "
+                    f"llm_call={event['llm_call']}"
+                )
 
     # Write events as JSONL.
     with open(output_path, "w") as file:
@@ -186,21 +323,25 @@ def detect_direct_video(video_path, zones_path, output_path):
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     cap.release()
 
-    detector = ShelfEventDetector(zones["shelf"])
+    detector = ShelfEventDetector(
+        zones["shelf"],
+        counter_polygon=zones.get("counter"),
+        exit_polygon=zones.get("exit"),
+    )
     events = []
     pose_detector = PoseDetector()
 
     for frame, result in enumerate(pose_detector.track(video_path)):
         timestamp = round(frame / fps, 3)
-        for person in pose_detector.get_people(result, timestamp):
-            for event in detector.update(person, timestamp):
-                events.append(event)
-                print(
-                    f"[{event['timestamp']:.3f}s] "
-                    f"Person {event['track_id']}: "
-                    f"{event['event']} "
-                    f"llm_call={event['llm_call']}"
-                )
+        people = pose_detector.get_people(result, timestamp)
+        for event in detector.process_frame(people, timestamp):
+            events.append(event)
+            print(
+                f"[{event['timestamp']:.3f}s] "
+                f"Person {event['track_id']}: "
+                f"{event['event']} "
+                f"llm_call={event['llm_call']}"
+            )
 
     with open(output_path, "w") as file:
         for event in events:
