@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.idea/
+configs/zones.yaml
 
 data/*
 !data/.gitkeep
@@ -11,3 +13,4 @@ runs/
 *.mov
 *.pt
 *.db
+configs/saved_zones_yamls/*.yaml
