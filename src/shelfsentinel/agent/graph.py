@@ -135,6 +135,9 @@ def decide(state):
     elif taken and exited and counter is False:
         severity = "L1"
         why = "item taken and left without visiting the counter"
+    elif state["deviation"] and state["llm_calls"] == 0:
+        severity = "inconclusive"
+        why = "unusual visit but not checked (no llm calls left)"
     elif not state["clear_view"] and state["deviation"]:
         severity = "inconclusive"
         why = "hands not clearly visible, evidence obscured"
