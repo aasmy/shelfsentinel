@@ -9,7 +9,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from shelfsentinel.storage.db import connect, list_cases, save_case, set_review
+from shelfsentinel.storage.db import (
+    connect,
+    delete_case,
+    list_cases,
+    save_case,
+    set_review,
+)
 
 
 def sample_case(**overrides):
@@ -115,6 +121,46 @@ def test_missing_database_directory_is_created(tmp_path):
         conn.close()
 
     assert database_path.parent.is_dir()
+
+
+def test_deletes_existing_case_and_preserves_other_cases_and_database(tmp_path):
+    conn = connect(tmp_path / "cases.db")
+    try:
+        with conn:
+            deleted_id = save_case(conn, sample_case(track_id=7))
+            remaining_id = save_case(
+                conn,
+                sample_case(track_id=8, severity="L1"),
+            )
+
+        with conn:
+            assert delete_case(conn, deleted_id)
+
+        remaining = list_cases(conn)
+        assert [case["id"] for case in remaining] == [remaining_id]
+        assert remaining[0]["track_id"] == 8
+        assert remaining[0]["severity"] == "L1"
+
+        with conn:
+            new_id = save_case(conn, sample_case(track_id=9))
+        assert new_id > remaining_id
+        assert len(list_cases(conn)) == 2
+    finally:
+        conn.close()
+
+
+def test_deleting_nonexistent_case_returns_false_without_changing_rows(tmp_path):
+    conn = connect(tmp_path / "cases.db")
+    try:
+        with conn:
+            case_id = save_case(conn, sample_case())
+
+        with conn:
+            assert not delete_case(conn, case_id + 100)
+
+        assert [case["id"] for case in list_cases(conn)] == [case_id]
+    finally:
+        conn.close()
 
 
 def test_run_agent_persists_cases_to_jsonl_and_sqlite_once_per_track(

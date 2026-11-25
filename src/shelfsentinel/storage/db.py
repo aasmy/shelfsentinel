@@ -112,3 +112,14 @@ def set_review(conn, case_id, review, commit=True):
     if commit:
         conn.commit()
     return cursor.rowcount == 1
+
+
+def delete_case(conn, case_id, commit=True):
+    """Delete one case and return whether a row was removed."""
+    cursor = conn.execute(
+        "DELETE FROM cases WHERE id = ?",
+        (case_id,),
+    )
+    if commit:
+        conn.commit()
+    return cursor.rowcount == 1

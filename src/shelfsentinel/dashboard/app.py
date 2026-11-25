@@ -7,7 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from shelfsentinel.dashboard.data import load_cases, update_review
+from shelfsentinel.dashboard.data import delete_case, load_cases, update_review
 from shelfsentinel.storage.db import DEFAULT_DB, REVIEW_STATUSES
 
 
@@ -15,6 +15,8 @@ def main():
     st.set_page_config(page_title="ShelfSentinel Cases", layout="wide")
     st.title("ShelfSentinel Case Review")
     st.caption("Browse investigation cases and record a human review status.")
+    if st.session_state.pop("case_delete_success", False):
+        st.success("Case deleted.")
 
     with st.sidebar:
         st.header("Database")
@@ -133,6 +135,45 @@ def main():
                 st.rerun()
             else:
                 st.error("Case no longer exists in the selected database.")
+
+    pending_delete_key = "pending_delete_case_id"
+    if st.button("Delete Case", key=f"delete-case-{case['id']}"):
+        st.session_state[pending_delete_key] = case["id"]
+        st.rerun()
+
+    if st.session_state.get(pending_delete_key) == case["id"]:
+        st.warning(
+            f"Delete case #{case['id']} for {case['video']} "
+            f"(track {case['track_id']}, severity {case['severity']})? "
+            "This permanently removes the case record. The source video "
+            "will not be deleted."
+        )
+        confirm_column, cancel_column = st.columns(2)
+        if confirm_column.button(
+            "Confirm Delete",
+            key=f"confirm-delete-{case['id']}",
+            type="primary",
+        ):
+            try:
+                deleted = delete_case(db_path, case["id"])
+            except Exception as exc:
+                st.error(f"Could not delete case #{case['id']}: {exc}")
+            else:
+                st.session_state.pop(pending_delete_key, None)
+                if deleted:
+                    st.session_state["case_delete_success"] = True
+                else:
+                    st.session_state["case_delete_missing"] = case["id"]
+                st.rerun()
+        if cancel_column.button("Cancel", key=f"cancel-delete-{case['id']}"):
+            st.session_state.pop(pending_delete_key, None)
+            st.rerun()
+
+    missing_case_id = st.session_state.pop("case_delete_missing", None)
+    if missing_case_id is not None:
+        st.warning(
+            f"Case #{missing_case_id} was already deleted or no longer exists."
+        )
 
 
 if __name__ == "__main__":

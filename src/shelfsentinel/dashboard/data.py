@@ -2,7 +2,12 @@
 
 from contextlib import closing
 
-from shelfsentinel.storage.db import connect, list_cases, set_review
+from shelfsentinel.storage.db import (
+    connect,
+    delete_case as delete_stored_case,
+    list_cases,
+    set_review,
+)
 
 
 def load_cases(db_path):
@@ -20,3 +25,10 @@ def update_review(db_path, case_id, review):
     with closing(connect(db_path)) as conn:
         with conn:
             return set_review(conn, case_id, review, commit=False)
+
+
+def delete_case(db_path, case_id):
+    """Delete a case and close the database connection."""
+    with closing(connect(db_path)) as conn:
+        with conn:
+            return delete_stored_case(conn, case_id, commit=False)
