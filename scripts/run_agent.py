@@ -4,6 +4,7 @@
 #   python scripts/run_pipeline.py --video data/test.mp4 --no-llm
 # step 2 (agent, uses the events from step 1):
 #   python scripts/run_agent.py --video data/test.mp4 --max-calls 5
+# python scripts/run_agent.py --video data/public/clips/1_3_crop.mp4 --max-calls 20
 #   python scripts/run_agent.py --video data/test.mp4 --no-llm      (timeline + counter check only)
 
 import argparse
@@ -12,7 +13,11 @@ import sys
 import time
 from pathlib import Path
 
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from shelfsentinel.llm.provider_manager import ProviderManager
+from shelfsentinel.llm.provider_status import ProviderStatus
 from shelfsentinel.agent.graph import build_graph, run_case
 
 
@@ -49,11 +54,22 @@ def main():
     moments.sort(key=lambda m: m["t"])
 
     llm, blur = None, None
+    provider_manager = None
     if not args.no_llm:
         from shelfsentinel.llm.gemini import Gemini
+        from shelfsentinel.llm.groq_api import GroqApi
+        gemini = Gemini()
+        groq_api = GroqApi()
+        providers = [
+
+            ProviderStatus("gemini", gemini),
+            ProviderStatus("groq", groq_api),
+        ]
+        provider_manager = ProviderManager(providers)
         from shelfsentinel.privacy.blur import blur_faces
 
-        llm, blur = PacedLLM(Gemini(), args.delay), blur_faces
+        # llm, blur = PacedLLM(Gemini(), args.delay), blur_faces
+        llm, blur = provider_manager, blur_faces
 
     # one visit = one track that reached into the shelf
     tracks = sorted({m["track_id"] for m in moments if m["event"] == "hand_reach_shelf" and m.get("llm_call")})

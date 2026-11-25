@@ -1,7 +1,7 @@
 # full rough pipeline: video -> detector -> hand on shelf moments -> frames -> gemini -> results
 # usage: python scripts/run_pipeline.py --video data/test.mp4
 #        python scripts/run_pipeline.py --video data/test.mp4 --no-llm   (just find the moments, no api calls)
-# python scripts/run_pipeline.py --video data/public/clips/1_1_crop.mp4
+# python scripts/run_pipeline.py --video data/public/clips/1_3_crop.mp4
 # python scripts/run_pipeline.py --video data/public/clips/test_vid4.mp4
 # saves runs/<video>/cases.jsonl
 
@@ -117,7 +117,7 @@ def main():
         provider_manager = ProviderManager(providers)
 
 
-    print("2) asking gemini" if gemini else "2) skipping gemini (--no-llm)")
+    print("2) asking llm" if provider_manager is not None else "2) skipping gemini (--no-llm)")
 
     with open(out_file, "w") as f:
         for i, m in enumerate(moments):
