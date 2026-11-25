@@ -7,7 +7,12 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from shelfsentinel.dashboard.data import delete_case, load_cases, update_review
+from shelfsentinel.dashboard.data import (
+    VideoCleanupError,
+    delete_case,
+    load_cases,
+    update_review,
+)
 from shelfsentinel.storage.db import DEFAULT_DB, REVIEW_STATUSES
 
 
@@ -17,6 +22,9 @@ def main():
     st.caption("Browse investigation cases and record a human review status.")
     if st.session_state.pop("case_delete_success", False):
         st.success("Case deleted.")
+    cleanup_error = st.session_state.pop("case_delete_cleanup_error", None)
+    if cleanup_error:
+        st.error(cleanup_error)
 
     with st.sidebar:
         st.header("Database")
@@ -101,6 +109,59 @@ def main():
     else:
         st.write("No accepted evidence.")
 
+    st.markdown("**Video Evidence**")
+    video_clips = case.get("video_clips", [])
+    if not video_clips:
+        st.write("No video clips are available for this case.")
+    else:
+        clip_titles = {
+            "shelf_interaction": "Shelf Interaction",
+            "checkout": "Checkout",
+            "exit": "Exit",
+        }
+        for clip in video_clips:
+            if not isinstance(clip, dict):
+                st.warning("Skipping malformed video clip metadata.")
+                continue
+            event_type = clip.get("event_type", "video")
+            if not isinstance(event_type, str):
+                event_type = "video"
+            title = clip_titles.get(
+                event_type,
+                event_type.replace("_", " ").title(),
+            )
+            st.markdown(f"**{title}**")
+            start_time = clip.get("start_time")
+            end_time = clip.get("end_time")
+            if (
+                isinstance(start_time, (int, float))
+                and not isinstance(start_time, bool)
+                and isinstance(end_time, (int, float))
+                and not isinstance(end_time, bool)
+            ):
+                st.caption(
+                    f"Track {clip.get('track_id', case['track_id'])} · "
+                    f"{start_time:.2f}s–{end_time:.2f}s"
+                )
+            raw_path = clip.get("path")
+            if not isinstance(raw_path, str) or not raw_path:
+                st.warning("Video evidence metadata has no valid file path.")
+                continue
+            clip_path = Path(raw_path)
+            if clip_path.is_absolute():
+                st.warning(f"Video path must be relative: {clip_path}")
+                continue
+            resolved_path = (Path.cwd() / clip_path).resolve()
+            try:
+                resolved_path.relative_to(Path.cwd().resolve())
+            except ValueError:
+                st.warning("Video path is outside the project directory.")
+                continue
+            if not resolved_path.is_file():
+                st.warning(f"Video evidence file is missing: {clip_path}")
+                continue
+            st.video(str(resolved_path))
+
     st.markdown("**Dropped claims**")
     if case["dropped"]:
         for index, dropped in enumerate(case["dropped"], start=1):
@@ -145,8 +206,8 @@ def main():
         st.warning(
             f"Delete case #{case['id']} for {case['video']} "
             f"(track {case['track_id']}, severity {case['severity']})? "
-            "This permanently removes the case record. The source video "
-            "will not be deleted."
+            "This permanently removes the case record and its generated "
+            "evidence clips. The source video will not be deleted."
         )
         confirm_column, cancel_column = st.columns(2)
         if confirm_column.button(
@@ -156,6 +217,10 @@ def main():
         ):
             try:
                 deleted = delete_case(db_path, case["id"])
+            except VideoCleanupError as exc:
+                st.session_state.pop(pending_delete_key, None)
+                st.session_state["case_delete_cleanup_error"] = str(exc)
+                st.rerun()
             except Exception as exc:
                 st.error(f"Could not delete case #{case['id']}: {exc}")
             else:

@@ -19,6 +19,14 @@ the agent saves every generated case, including normal and inconclusive cases.
 Omit `--no-llm` to allow the agent to call Gemini (configure `GEMINI_API_KEY`
 in `.env` first).
 
+For investigated cases, accepted `item_taken` evidence can produce shelf clips;
+completed checkout visits and exit events produce their own clips. The clips are
+stored under `runs/case_<database-id>/`, while relative paths and event times
+are saved in the SQLite `video_clips` column. Existing databases gain that
+column automatically when opened. The dashboard plays available clips and
+deleting a case also removes only its generated `runs/case_<id>/` directory;
+the original source video is retained.
+
 ## Launch the case dashboard
 
 Install the project dependencies, then run Streamlit from the repository root:

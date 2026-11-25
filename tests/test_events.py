@@ -72,17 +72,50 @@ assert counter_detector.process_frame(
     [person(bbox=[400, 100, 500, 200])], 13.0
 ) == []
 
-# Counter: leave resets the visit; return generates a new event.
+# Counter: a brief boundary fluctuation does not close the checkout visit.
 assert counter_detector.process_frame(
     [person(bbox=[0, 100, 100, 200])], 14.0
 ) == []
 assert counter_detector.process_frame(
     [person(bbox=[400, 100, 500, 200])], 15.0
 ) == []
-confirmed = counter_detector.process_frame(
+assert counter_detector.process_frame(
     [person(bbox=[400, 100, 500, 200])], 17.0
+) == []
+
+# A sustained departure emits one leave event; a later visit can be reported.
+assert counter_detector.process_frame(
+    [person(bbox=[0, 100, 100, 200])], 18.0
+) == []
+leave_events = counter_detector.process_frame(
+    [person(bbox=[0, 100, 100, 200])], 18.8
+)
+assert len(events_named(leave_events, "leave_counter")) == 1
+assert events_named(leave_events, "leave_counter")[0]["track_id"] == 1
+assert events_named(leave_events, "leave_counter")[0]["timestamp"] == 18.0
+assert counter_detector.process_frame(
+    [person(bbox=[0, 100, 100, 200])], 19.0
+) == []
+assert counter_detector.process_frame(
+    [person(bbox=[400, 100, 500, 200])], 20.0
+) == []
+confirmed = counter_detector.process_frame(
+    [person(bbox=[400, 100, 500, 200])], 22.0
 )
 assert len(events_named(confirmed, "at_counter")) == 1
+
+# Leaving without a confirmed at_counter visit never emits leave_counter.
+unconfirmed_detector = ShelfEventDetector(shelf, counter_polygon=counter)
+unconfirmed_detector.process_frame(
+    [person(bbox=[400, 100, 500, 200])], 30.0
+)
+unconfirmed_detector.process_frame(
+    [person(bbox=[0, 100, 100, 200])], 30.2
+)
+unconfirmed_leave = unconfirmed_detector.process_frame(
+    [person(bbox=[0, 100, 100, 200])], 31.0
+)
+assert events_named(unconfirmed_leave, "leave_counter") == []
 
 # Counter: a brief visit never produces an event.
 brief_detector = ShelfEventDetector(shelf, counter_polygon=counter)
@@ -145,6 +178,24 @@ multi_detector.process_frame([
 multi_detector.process_frame([], 41.0)
 exit_events = multi_detector.process_frame([], 43.0)
 assert {event["track_id"] for event in exit_events if event["event"] == "person_exited"} == {4, 5}
+
+# Counter departure state is independent for each track.
+multi_counter = ShelfEventDetector(shelf, counter_polygon=counter)
+for track_id in (10, 11):
+    multi_counter.process_frame(
+        [person(track_id=track_id, bbox=[400, 100, 500, 200])], 50.0
+    )
+    multi_counter.process_frame(
+        [person(track_id=track_id, bbox=[400, 100, 500, 200])], 52.0
+    )
+multi_counter.process_frame(
+    [person(track_id=10, bbox=[0, 100, 100, 200])], 53.0
+)
+multi_counter.process_frame(
+    [person(track_id=10, bbox=[0, 100, 100, 200])], 53.8
+)
+assert multi_counter.counter_states[11]["inside"] is True
+assert multi_counter.counter_states[11]["reported"] is True
 
 # Missing zones and missing bounding boxes do not crash.
 missing_detector = ShelfEventDetector(shelf)

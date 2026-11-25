@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS cases (
     evidence TEXT NOT NULL,
     dropped TEXT NOT NULL,
     llm_calls INTEGER NOT NULL,
-    review TEXT NOT NULL DEFAULT 'pending'
+    review TEXT NOT NULL DEFAULT 'pending',
+    video_clips TEXT NOT NULL DEFAULT '[]'
 )
 """
 
@@ -28,6 +29,7 @@ JSON_FIELDS = {
     "checks": {},
     "evidence": [],
     "dropped": [],
+    "video_clips": [],
 }
 
 
@@ -42,6 +44,14 @@ def connect(path=DEFAULT_DB):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute(SCHEMA)
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(cases)").fetchall()
+    }
+    if "video_clips" not in columns:
+        conn.execute(
+            "ALTER TABLE cases ADD COLUMN video_clips TEXT NOT NULL DEFAULT '[]'"
+        )
+        conn.commit()
     return conn
 
 
@@ -62,13 +72,14 @@ def save_case(conn, case, commit=True):
         json.dumps(case.get("evidence", []), allow_nan=False),
         json.dumps(case.get("dropped", []), allow_nan=False),
         case.get("llm_calls", 0),
+        json.dumps(case.get("video_clips", []), allow_nan=False),
     )
     cursor = conn.execute(
         """
         INSERT INTO cases (
             created_at, video, track_id, severity, summary,
-            checks, evidence, dropped, llm_calls
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            checks, evidence, dropped, llm_calls, video_clips
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         values,
     )
@@ -108,6 +119,17 @@ def set_review(conn, case_id, review, commit=True):
     cursor = conn.execute(
         "UPDATE cases SET review = ? WHERE id = ?",
         (review, case_id),
+    )
+    if commit:
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def update_case_video_clips(conn, case_id, video_clips, commit=True):
+    """Replace a case's clip metadata and return whether the case existed."""
+    cursor = conn.execute(
+        "UPDATE cases SET video_clips = ? WHERE id = ?",
+        (json.dumps(video_clips, allow_nan=False), case_id),
     )
     if commit:
         conn.commit()

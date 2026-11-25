@@ -31,6 +31,7 @@ class ShelfEventDetector:
         self.states = {}
         self.counter_states = {}
         self.exit_states = {}
+        self.counter_leave_grace_seconds = 0.75
 
     def process_frame(self, people, timestamp):
         """Process shelf, counter, and exit state for one complete frame."""
@@ -82,6 +83,7 @@ class ShelfEventDetector:
             "inside": False,
             "entered_at": None,
             "reported": False,
+            "leave_started_at": None,
         })
 
         if inside:
@@ -89,6 +91,7 @@ class ShelfEventDetector:
                 state["inside"] = True
                 state["entered_at"] = timestamp
                 state["reported"] = False
+                state["leave_started_at"] = None
             elif (
                 not state["reported"]
                 and timestamp - state["entered_at"] >= 2.0
@@ -100,10 +103,29 @@ class ShelfEventDetector:
                     "timestamp": round(timestamp, 3),
                     "llm_call": False,
                 }]
+            state["leave_started_at"] = None
         else:
+            if not state["inside"]:
+                return []
+            if state["leave_started_at"] is None:
+                state["leave_started_at"] = timestamp
+                return []
+            if timestamp - state["leave_started_at"] < self.counter_leave_grace_seconds:
+                return []
+
+            events = []
+            if state["reported"]:
+                events.append({
+                    "track_id": track_id,
+                    "event": "leave_counter",
+                    "timestamp": round(state["leave_started_at"], 3),
+                    "llm_call": False,
+                })
             state["inside"] = False
             state["entered_at"] = None
             state["reported"] = False
+            state["leave_started_at"] = None
+            return events
         return []
 
     def _update_exit_presence(self, track_id, person, timestamp):

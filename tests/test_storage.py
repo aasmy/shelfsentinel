@@ -2,6 +2,7 @@
 
 import json
 import runpy
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -15,7 +16,13 @@ from shelfsentinel.storage.db import (
     list_cases,
     save_case,
     set_review,
+    update_case_video_clips,
 )
+from shelfsentinel.dashboard.data import (
+    VideoCleanupError,
+    delete_case as delete_dashboard_case,
+)
+from shelfsentinel.video import clips as video_clips_module
 
 
 def sample_case(**overrides):
@@ -51,9 +58,18 @@ def sample_case(**overrides):
 def test_saves_and_retrieves_case_with_json_fields_round_tripped(tmp_path):
     database_path = tmp_path / "new" / "nested" / "cases.db"
     conn = connect(database_path)
+    video_clips = [
+        {
+            "event_type": "exit",
+            "track_id": 7,
+            "start_time": 1.0,
+            "end_time": 4.0,
+            "path": "runs/case_1/exit_1.mp4",
+        }
+    ]
     try:
         with conn:
-            case_id = save_case(conn, sample_case())
+            case_id = save_case(conn, sample_case(video_clips=video_clips))
 
         cases = list_cases(conn)
     finally:
@@ -71,6 +87,7 @@ def test_saves_and_retrieves_case_with_json_fields_round_tripped(tmp_path):
     assert stored["dropped"] == sample_case()["dropped"]
     assert stored["llm_calls"] == 1
     assert stored["review"] == "pending"
+    assert stored["video_clips"] == video_clips
     assert stored["created_at"]
     assert database_path.is_file()
 
@@ -163,6 +180,164 @@ def test_deleting_nonexistent_case_returns_false_without_changing_rows(tmp_path)
         conn.close()
 
 
+def test_saves_lists_and_updates_video_clip_metadata(tmp_path):
+    conn = connect(tmp_path / "cases.db")
+    clips = [
+        {
+            "event_type": "checkout",
+            "track_id": 7,
+            "start_time": 1.0,
+            "end_time": 4.0,
+            "path": "runs/case_1/checkout_1.mp4",
+        }
+    ]
+    try:
+        with conn:
+            case_id = save_case(conn, sample_case())
+        with conn:
+            assert update_case_video_clips(conn, case_id, clips)
+        assert list_cases(conn)[0]["video_clips"] == clips
+        assert not update_case_video_clips(conn, case_id + 1, clips)
+    finally:
+        conn.close()
+
+
+def test_existing_database_without_video_clips_is_migrated(tmp_path):
+    database_path = tmp_path / "legacy.db"
+    raw = sqlite3.connect(database_path)
+    raw.execute(
+        """
+        CREATE TABLE cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            video TEXT NOT NULL,
+            track_id INTEGER NOT NULL,
+            severity TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            checks TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            dropped TEXT NOT NULL,
+            llm_calls INTEGER NOT NULL,
+            review TEXT NOT NULL DEFAULT 'pending'
+        )
+        """
+    )
+    raw.execute(
+        """INSERT INTO cases (
+            created_at, video, track_id, severity, summary,
+            checks, evidence, dropped, llm_calls
+        ) VALUES ('now', 'video.mp4', 3, 'normal', 'summary', '{}', '[]', '[]', 0)"""
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(database_path)
+    try:
+        cases = list_cases(conn)
+        assert len(cases) == 1
+        assert cases[0]["video_clips"] == []
+        assert "video_clips" in {
+            row["name"] for row in conn.execute("PRAGMA table_info(cases)")
+        }
+    finally:
+        conn.close()
+
+
+def test_dashboard_case_deletion_removes_only_its_video_directory(tmp_path):
+    database_path = tmp_path / "cases.db"
+    runs_dir = tmp_path / "runs"
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"original")
+    conn = connect(database_path)
+    try:
+        with conn:
+            case_id = save_case(conn, sample_case())
+            other_id = save_case(conn, sample_case(track_id=8))
+    finally:
+        conn.close()
+
+    target_dir = runs_dir / f"case_{case_id}"
+    other_dir = runs_dir / f"case_{other_id}"
+    target_dir.mkdir(parents=True)
+    other_dir.mkdir(parents=True)
+    (target_dir / "evidence.mp4").write_bytes(b"evidence")
+    (other_dir / "evidence.mp4").write_bytes(b"other")
+
+    assert delete_dashboard_case(database_path, case_id, runs_dir=runs_dir)
+    assert not target_dir.exists()
+    assert (other_dir / "evidence.mp4").is_file()
+    assert source_video.read_bytes() == b"original"
+
+    conn = connect(database_path)
+    try:
+        assert [case["id"] for case in list_cases(conn)] == [other_id]
+    finally:
+        conn.close()
+
+
+def test_dashboard_case_deletion_handles_missing_directory_and_case(tmp_path):
+    database_path = tmp_path / "cases.db"
+    runs_dir = tmp_path / "runs"
+    conn = connect(database_path)
+    try:
+        with conn:
+            case_id = save_case(conn, sample_case())
+    finally:
+        conn.close()
+
+    assert delete_dashboard_case(database_path, case_id, runs_dir=runs_dir)
+    assert not delete_dashboard_case(
+        database_path, case_id, runs_dir=runs_dir
+    )
+
+
+def test_dashboard_case_deletion_never_removes_source_inside_case_directory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    database_path = tmp_path / "cases.db"
+    runs_dir = tmp_path / "runs"
+    conn = connect(database_path)
+    try:
+        with conn:
+            case_id = save_case(
+                conn,
+                sample_case(video=f"runs/case_1/original.mp4"),
+            )
+            clip = {
+                "event_type": "exit",
+                "track_id": 7,
+                "path": f"runs/case_{case_id}/exit_1.mp4",
+            }
+            source_metadata = {"path": f"runs/case_{case_id}/original.mp4"}
+            update_case_video_clips(
+                conn,
+                case_id,
+                [clip, source_metadata],
+                commit=False,
+            )
+    finally:
+        conn.close()
+
+    case_dir = runs_dir / f"case_{case_id}"
+    case_dir.mkdir(parents=True)
+    source = case_dir / "original.mp4"
+    evidence = case_dir / "exit_1.mp4"
+    source.write_bytes(b"source")
+    evidence.write_bytes(b"clip")
+
+    with pytest.raises(VideoCleanupError, match="source video"):
+        delete_dashboard_case(database_path, case_id, runs_dir=runs_dir)
+
+    assert source.read_bytes() == b"source"
+    assert not evidence.exists()
+    conn = connect(database_path)
+    try:
+        assert list_cases(conn) == []
+    finally:
+        conn.close()
+
+
 def test_run_agent_persists_cases_to_jsonl_and_sqlite_once_per_track(
     tmp_path, monkeypatch
 ):
@@ -205,6 +380,30 @@ def test_run_agent_persists_cases_to_jsonl_and_sqlite_once_per_track(
     )
     output_path = tmp_path / "output" / "agent_cases.jsonl"
     database_path = tmp_path / "database" / "cases.db"
+    expected_clip = {
+        "event_type": "exit",
+        "track_id": 7,
+        "start_time": 6.0,
+        "end_time": 10.0,
+        "path": "runs/case_1/exit_1.mp4",
+    }
+
+    def create_clips(video_path, case_id, track_id, case_events, evidence):
+        assert video_path == "sample.mp4"
+        assert track_id == 7
+        assert any(event["event"] == "person_exited" for event in case_events)
+        existing_conn = connect(database_path)
+        try:
+            assert [case["id"] for case in list_cases(existing_conn)] == [case_id]
+        finally:
+            existing_conn.close()
+        return [expected_clip]
+
+    monkeypatch.setattr(
+        video_clips_module,
+        "create_case_clips",
+        create_clips,
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -240,3 +439,5 @@ def test_run_agent_persists_cases_to_jsonl_and_sqlite_once_per_track(
     assert output_cases[0]["track_id"] == stored_cases[0]["track_id"] == 7
     assert output_cases[0]["severity"] == stored_cases[0]["severity"] == "inconclusive"
     assert stored_cases[0]["llm_calls"] == 0
+    assert output_cases[0]["video_clips"] == [expected_clip]
+    assert stored_cases[0]["video_clips"] == [expected_clip]

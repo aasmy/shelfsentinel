@@ -14,7 +14,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from shelfsentinel.agent.graph import build_graph, run_case
-from shelfsentinel.storage.db import DEFAULT_DB, connect, save_case
+from shelfsentinel.storage.db import (
+    DEFAULT_DB,
+    connect,
+    save_case,
+    update_case_video_clips,
+)
+from shelfsentinel.video.clips import create_case_clips
 
 
 class PacedLLM:
@@ -68,32 +74,45 @@ def main():
     graph = build_graph()
     used = 0
     try:
-        with conn:
-            with out_path.open("w", encoding="utf-8") as out:
-                for case_number, tid in enumerate(tracks, 1):
-                    budget = min(args.per_case, args.max_calls - used)
-                    case = run_case(
-                        str(args.video),
+        with out_path.open("w", encoding="utf-8") as out:
+            for case_number, tid in enumerate(tracks, 1):
+                budget = min(args.per_case, args.max_calls - used)
+                case = run_case(
+                    str(args.video),
+                    tid,
+                    moments,
+                    llm=llm if budget > 0 else None,
+                    max_calls=max(budget, 0),
+                    blur=blur,
+                    graph=graph,
+                )
+                used += case["llm_calls"]
+
+                # Persist first so the stable database ID owns the evidence folder.
+                db_id = save_case(conn, case)
+                clips = []
+                if case.get("checks"):
+                    clips = create_case_clips(
+                        args.video,
+                        db_id,
                         tid,
                         moments,
-                        llm=llm if budget > 0 else None,
-                        max_calls=max(budget, 0),
-                        blur=blur,
-                        graph=graph,
+                        case["evidence"],
                     )
-                    used += case["llm_calls"]
-                    db_id = save_case(conn, case, commit=False)
-                    out.write(json.dumps(case) + "\n")
+                update_case_video_clips(conn, db_id, clips)
+                case["video_clips"] = clips
+
+                out.write(json.dumps(case) + "\n")
+                print(
+                    f"case {case_number} (db {db_id})  track {tid:<3} "
+                    f"{case['severity']:<12} calls={case['llm_calls']}  "
+                    f"{case['summary']}"
+                )
+                for dropped in case["dropped"]:
                     print(
-                        f"case {case_number} (db {db_id})  track {tid:<3} "
-                        f"{case['severity']:<12} calls={case['llm_calls']}  "
-                        f"{case['summary']}"
+                        f"      dropped: {dropped.get('claim')} "
+                        f"({dropped['reason']})"
                     )
-                    for dropped in case["dropped"]:
-                        print(
-                            f"      dropped: {dropped.get('claim')} "
-                            f"({dropped['reason']})"
-                        )
     finally:
         conn.close()
     print(f"\n{used} llm calls, cases saved to {out_path} and {args.db}")
