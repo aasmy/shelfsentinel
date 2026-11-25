@@ -1,6 +1,8 @@
 # full rough pipeline: video -> detector -> hand on shelf moments -> frames -> gemini -> results
 # usage: python scripts/run_pipeline.py --video data/test.mp4
 #        python scripts/run_pipeline.py --video data/test.mp4 --no-llm   (just find the moments, no api calls)
+# python scripts/run_pipeline.py --video data/public/clips/1_1_crop.mp4
+# python scripts/run_pipeline.py --video data/public/clips/test_vid4.mp4
 # saves runs/<video>/cases.jsonl
 
 import argparse
@@ -11,7 +13,11 @@ from pathlib import Path
 
 import cv2
 
+
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from shelfsentinel.llm.provider_manager import ProviderManager
+from shelfsentinel.llm.provider_status import ProviderStatus
 from shelfsentinel.frames import get_frames
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.zones import load_zones, point_in_polygon
@@ -55,9 +61,9 @@ def main():
     parser.add_argument("--video", required=True)
     parser.add_argument("--zones", default="configs/zones.yaml")
     parser.add_argument("--out", default="runs")
-    parser.add_argument("--max-calls", type=int, default=5, help="max gemini calls per run, to save quota")
+    parser.add_argument("--max-calls", type=int, default=100, help="max gemini calls per run, to save quota")
     parser.add_argument("--no-llm", action="store_true")
-    parser.add_argument("--delay", type=float, default=13, help="seconds between gemini calls (free tier is 5 per minute)")
+    parser.add_argument("--delay", type=float, default=10, help="seconds between gemini calls (free tier is 5 per minute)")
     args = parser.parse_args()
 
     zones = load_zones(args.zones)
@@ -76,31 +82,37 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "cases.jsonl"
 
-    gemini = None
+    provider_manager = None
     if not args.no_llm:
-        from shelfsentinel.llm.gemini import DailyLimitError, Gemini
-
+        from shelfsentinel.llm.gemini import Gemini
+        from shelfsentinel.llm.groq_api import GroqApi
         gemini = Gemini()
+        groq_api = GroqApi()
+        providers = [
 
-    print("2) asking gemini" if gemini else "2) skipping gemini (--no-llm)")
+            ProviderStatus("gemini", gemini),
+            ProviderStatus("groq", groq_api),
+        ]
+        provider_manager = ProviderManager(providers)
+
+
+
+    # print("2) asking llm" if len(providers) > 0 else "2) skipping llm (--no-llm)")
+
     with open(out_file, "w") as f:
         for i, m in enumerate(moments):
             case = dict(m)
             frames = get_frames(args.video, m["t"])
             case["frame_times"] = [ft for ft, _ in frames]
 
-            if gemini and i < args.max_calls:
-                if i > 0:
-                    time.sleep(args.delay)
+            if provider_manager is not None and i < args.max_calls:
+                # if i > 0:
+                #
+                case["llm"] = ""
                 prompt = PROMPT.format(n=len(frames), times=case["frame_times"])
-                try:
-                    case["llm"] = gemini.ask_with_images(prompt, [fr for _, fr in frames])
-                except DailyLimitError:
-                    print("daily gemini limit reached, saving the rest without llm results")
-                    gemini = None
-                except Exception as e:  # keep going if one call fails
-                    case["llm_error"] = str(e)
-                print(f"{m['t']:6.1f}s  track {m['track_id']}  ->  {case.get('llm', case.get('llm_error', 'skipped'))}")
+                case["llm"] = provider_manager.ask_with_images(prompt,
+                                                     [fr for _, fr in frames])
+            print(f"{m['t']:6.1f}s  track {m['track_id']}  ->  {case.get('llm')}")
 
             f.write(json.dumps(case) + "\n")
 
