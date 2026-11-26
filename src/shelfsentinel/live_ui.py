@@ -99,7 +99,7 @@ def fit(img, height=VIEW_H):
     return cv2.resize(img, (int(w * scale), height), interpolation=cv2.INTER_AREA)
 
 
-def panel(height, status, timer, events, case, zones_source, hint):
+def panel(height, status, timer, events, case, zones_source, hint, help_lines=None):
     p = np.full((height, PANEL_W, 3), BG, np.uint8)
     text(p, "ShelfSentinel", (24, 46), 0.95, TEXT, 2)
     pill(p, "LIVE", (300, 44), RED, 0.55, (255, 255, 255))
@@ -111,6 +111,12 @@ def panel(height, status, timer, events, case, zones_source, hint):
     text(p, f"zones: {zones_source}", (24, 132), 0.45, MUTED)
 
     cv2.line(p, (24, 152), (PANEL_W - 24, 152), CARD, 1)
+    if help_lines:  # zones screen: show how to edit instead of the events
+        text(p, "EDIT ZONES", (24, 182), 0.5, MUTED)
+        for i, line in enumerate(help_lines):
+            text(p, line, (24, 216 + 30 * i), 0.52, YELLOW if i == 0 else TEXT)
+        text(p, hint, (24, height - 30), 0.48, MUTED)
+        return p
     text(p, "EVENTS", (24, 182), 0.5, MUTED)
     y = 214
     for t, track, name in events[-9:]:
@@ -139,9 +145,18 @@ def panel(height, status, timer, events, case, zones_source, hint):
     return p
 
 
-def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint):
+def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint, editor=None):
     view = camera_img.copy()
     view = draw_people(view, result)
     view = draw_zones(view, zones)
+    if editor is not None:
+        view = editor.draw_handles(view)
     view = fit(view)
-    return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint)])
+    help_lines = editor.help_lines() if editor is not None else None
+    return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint, help_lines)])
+
+
+def view_scale(camera_img):
+    """how much the camera image is scaled in the window (to map mouse clicks back to camera pixels)"""
+    h, w = camera_img.shape[:2]
+    return VIEW_H / h, int(w * VIEW_H / h)

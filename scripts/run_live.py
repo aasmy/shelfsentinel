@@ -8,8 +8,9 @@
 #   python scripts/run_live.py --camera 1 --no-llm     # other camera, no gemini calls for the cases
 #   python scripts/run_live.py --source data/x.mp4 --no-show   # a video file instead of the camera (testing)
 #
-# keys in the window: q = stop (the last visit still gets checked), z = find the zones again
-#   on the zones screen: enter = use them, g = try gemini, y = try yolo-world, m = draw by hand
+# keys in the window: q = stop (the last visit still gets checked), z = find the zones again, e = edit the zones
+#   on the zones screen: enter = use them, g = try gemini, y = try yolo-world, m = draw all by hand
+#   and to fix one zone: 1/2/3 or click to select, drag corners or the middle, r redraw, d delete, u undo, c cancel
 #
 # a visit starts when someone walks in and ends when nobody has been in view for a few seconds
 # (or after person_exited). then run_agent.py checks it in the background so the camera keeps going.
@@ -27,10 +28,11 @@ import cv2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from shelfsentinel.live_ui import compose
+from shelfsentinel.live_ui import compose, view_scale
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.events import ShelfEventDetector
 from shelfsentinel.perception.zones import load_zones, save_zones
+from shelfsentinel.zone_editor import ZoneEditor
 
 WINDOW = "ShelfSentinel live"
 RANK = {"L2": 3, "L1": 2, "inconclusive": 1}
@@ -111,38 +113,66 @@ def draw_by_hand(frame):
     return load_zones(str(path)) if path.exists() else {}
 
 
-def setup_zones(cap, method, args):
-    """find the zones on the current camera view and let the user accept or change them"""
+def setup_zones(cap, method, args, zones=None):
+    """find the zones on the current camera view (or start from the given ones when method is None),
+    then let the user fix them before using them"""
     ok, frame = cap.read()
     if not ok:
-        return {}, "camera gave no frame"
-    print(f"finding zones with {method}...")
-    zones, message = find_zones(frame, method)
-    print(message)
+        return zones or {}, "camera gave no frame"
+    if method:
+        print(f"finding zones with {method}...")
+        zones, message = find_zones(frame, method)
+        print(message)
+    else:
+        zones, message = dict(zones or {}), "editing current zones"
     if args.no_show:
         return zones, message
 
-    while True:
-        ok, live = cap.read()
-        if ok:
-            frame = live
-        status = "SETUP" if "shelf" in zones else "SETUP  no shelf"
-        img = compose(frame, zones, None, status, "", [], None, message,
-                      "enter use  g gemini  y yolo  m draw  q quit")
-        cv2.imshow(WINDOW, img)
-        key = cv2.waitKey(30) & 0xFF
-        if key in (13, 10) and "shelf" in zones:
-            return zones, message
-        if key == ord("g"):
-            zones, message = find_zones(frame, "gemini")
-        elif key == ord("y"):
-            zones, message = find_zones(frame, "yolo")
-        elif key == ord("m"):
-            drawn = draw_by_hand(frame)
-            if drawn:
-                zones, message = drawn, "drawn by hand"
-        elif key == ord("q"):
-            sys.exit("stopped")
+    editor = ZoneEditor(zones)
+    scale = {"s": 1.0, "w": 0}
+
+    def on_mouse(event, x, y, flags, param):
+        if x < scale["w"]:  # clicks on the side panel are ignored
+            editor.on_mouse(event, x / scale["s"], y / scale["s"])
+
+    cv2.setMouseCallback(WINDOW, on_mouse)
+    try:
+        while True:
+            if editor.drag is None and editor.drawing is None:  # keep the picture still while editing
+                ok, live = cap.read()
+                if ok:
+                    frame = live
+            scale["s"], scale["w"] = view_scale(frame)
+            status = "SETUP" if "shelf" in editor.zones else "SETUP  no shelf"
+            img = compose(frame, editor.zones, None, status, "", [], None, message,
+                          "enter use   g gemini   y yolo   m draw all   q quit", editor=editor)
+            cv2.imshow(WINDOW, img)
+            key = cv2.waitKey(30) & 0xFF
+            if key == 255:
+                continue
+            if editor.drawing is not None:
+                editor.on_key(key)
+            elif key in (13, 10):
+                if "shelf" in editor.zones:
+                    edited = editor.zones != editor.original
+                    return editor.zones, message + (", edited by hand" if edited else "")
+            elif key == ord("g"):
+                found, message = find_zones(frame, "gemini")
+                editor.load(found)
+            elif key == ord("y"):
+                found, message = find_zones(frame, "yolo")
+                editor.load(found)
+            elif key == ord("m"):
+                drawn = draw_by_hand(frame)
+                if drawn:
+                    editor.load(drawn)
+                    message = "drawn by hand"
+            elif key == ord("q"):
+                sys.exit("stopped")
+            else:
+                editor.on_key(key)
+    finally:
+        cv2.setMouseCallback(WINDOW, lambda *a: None)
 
 
 def main():
@@ -264,7 +294,7 @@ def main():
             else:
                 status, timer = "WAITING", ""
             img = compose(frame, zones, result, status, timer, events, latest_case, zones_source,
-                          "q stop    z find zones again")
+                          "q stop   z find zones   e edit zones")
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -274,6 +304,14 @@ def main():
                     finish(segment)
                     segment, last_seen = None, None
                 new_zones, source = setup_zones(cap, default_method(args), args)
+                if "shelf" in new_zones:
+                    zones, zones_source = new_zones, source
+                    save_zones(zones, str(zones_path))
+            if key == ord("e"):  # fix the current zones by hand, no detection
+                if segment is not None:
+                    finish(segment)
+                    segment, last_seen = None, None
+                new_zones, source = setup_zones(cap, None, args, zones)
                 if "shelf" in new_zones:
                     zones, zones_source = new_zones, source
                     save_zones(zones, str(zones_path))

@@ -74,7 +74,9 @@ Camera on the left with people, skeletons and the zones, and a side panel with t
 **Zones are found automatically** the first time (or with `--auto-zones`), so you dont have to redraw them when the room changes:
 - `--auto-zones gemini`: one Gemini call on a frame (faces blurred), most accurate
 - `--auto-zones yolo`: YOLO-World on the laptop, free and offline but less reliable
-- on the zones screen: `enter` use them, `g` try Gemini, `y` try YOLO-World, `m` draw by hand
+- on the zones screen: `enter` use them, `g` try Gemini, `y` try YOLO-World, `m` draw all by hand
+- fix one zone if something is off: `1` shelf / `2` counter / `3` exit (or click it) to select, drag a corner or the middle, `r` redraw it, `d` delete it, `u` undo, `c` cancel all edits
+- press `e` during live mode to edit the current zones without detecting them again
 - press `z` during live mode to find them again after moving the camera
 - they're saved to `configs/zones_live.yaml` and reused next time
 
