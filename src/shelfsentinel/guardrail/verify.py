@@ -18,6 +18,13 @@ def clean_text(text):
     return re.sub(r"\s{2,}", " ", text).strip(" ,;")
 
 
+def _as_bool(value):
+    # some providers send "true" / "false" as text, and bool("false") is True in python
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
 def verify(response, frame_times):
     """Check one llm answer against the frames that were sent.
 
@@ -25,12 +32,14 @@ def verify(response, frame_times):
     frame_times: times (s) of the frames we sent, in order
     returns (kept, dropped, clear_view)
     """
-    clear_view = bool(response.get("clear_view", False))
+    clear_view = _as_bool(response.get("clear_view", False))
     kept, dropped = [], []
 
     for c in response.get("claims", []) or []:
         claim = c.get("claim")
         frame = c.get("frame")
+        if isinstance(frame, str) and frame.strip().isdigit():
+            frame = int(frame)
         what = clean_text(c.get("what", ""))
         entry = {"claim": claim, "what": what}
 

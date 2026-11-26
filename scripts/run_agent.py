@@ -14,6 +14,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from shelfsentinel.agent.graph import build_graph, run_case
+from shelfsentinel.storage.db import (
+    DEFAULT_DB,
+    connect,
+    save_case,
+    update_case_video_clips,
+)
+from shelfsentinel.video.clips import create_case_clips
 
 
 class PacedLLM:
@@ -36,6 +43,7 @@ def main():
     parser.add_argument("--video", required=True)
     parser.add_argument("--events", help="events file from run_pipeline (default runs/<video>/cases.jsonl)")
     parser.add_argument("--out", help="where to save the cases (default runs/<video>/agent_cases.jsonl)")
+    parser.add_argument("--db", default=DEFAULT_DB, help="SQLite database path")
     parser.add_argument("--max-calls", type=int, default=5, help="max llm calls for the whole video")
     parser.add_argument("--per-case", type=int, default=3, help="max llm calls per visit")
     parser.add_argument("--delay", type=float, default=13)
@@ -61,22 +69,53 @@ def main():
 
     out_path = Path(args.out or Path("runs") / Path(args.video).stem / "agent_cases.jsonl")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out = open(out_path, "w")
 
+    conn = connect(args.db)
     graph = build_graph()
     used = 0
-    for case_id, tid in enumerate(tracks, 1):
-        budget = min(args.per_case, args.max_calls - used)
-        case = run_case(str(args.video), tid, moments, llm=llm if budget > 0 else None,
-                        max_calls=max(budget, 0), blur=blur, graph=graph)
-        used += case["llm_calls"]
-        out.write(json.dumps(case) + "\n")
-        print(f"case {case_id}  track {tid:<3} {case['severity']:<12} calls={case['llm_calls']}  {case['summary']}")
-        for d in case["dropped"]:
-            print(f"      dropped: {d.get('claim')} ({d['reason']})")
+    try:
+        with out_path.open("w", encoding="utf-8") as out:
+            for case_number, tid in enumerate(tracks, 1):
+                budget = min(args.per_case, args.max_calls - used)
+                case = run_case(
+                    str(args.video),
+                    tid,
+                    moments,
+                    llm=llm if budget > 0 else None,
+                    max_calls=max(budget, 0),
+                    blur=blur,
+                    graph=graph,
+                )
+                used += case["llm_calls"]
 
-    out.close()
-    print(f"\n{used} llm calls, cases saved to {out_path}")
+                # Persist first so the stable database ID owns the evidence folder.
+                db_id = save_case(conn, case)
+                clips = []
+                if case.get("checks"):
+                    clips = create_case_clips(
+                        args.video,
+                        db_id,
+                        tid,
+                        moments,
+                        case["evidence"],
+                    )
+                update_case_video_clips(conn, db_id, clips)
+                case["video_clips"] = clips
+
+                out.write(json.dumps(case) + "\n")
+                print(
+                    f"case {case_number} (db {db_id})  track {tid:<3} "
+                    f"{case['severity']:<12} calls={case['llm_calls']}  "
+                    f"{case['summary']}"
+                )
+                for dropped in case["dropped"]:
+                    print(
+                        f"      dropped: {dropped.get('claim')} "
+                        f"({dropped['reason']})"
+                    )
+    finally:
+        conn.close()
+    print(f"\n{used} llm calls, cases saved to {out_path} and {args.db}")
 
 
 if __name__ == "__main__":

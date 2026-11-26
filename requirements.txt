@@ -6,3 +6,5 @@ pyyaml
 google-genai
 python-dotenv
 langgraph
+streamlit
+imageio-ffmpeg
