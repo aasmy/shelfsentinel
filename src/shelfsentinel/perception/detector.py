@@ -43,6 +43,20 @@ class PoseDetector:
             verbose=False,
         )
 
+    def track_frame(self, frame, imgsz=None):
+        # same as track() but for one frame at a time (live camera), ids stay the same across calls.
+        # a smaller imgsz is a lot faster on a cpu (default yolo size is 640)
+        extra = {"imgsz": imgsz} if imgsz else {}
+        return self.model.track(
+            source=frame,
+            persist=True,
+            tracker=self.tracker,
+            conf=self.conf,
+            classes=[0],
+            verbose=False,
+            **extra,
+        )[0]
+
     def get_people(self, result, t):
         # turns one yolo result into a list of Person
         boxes = result.boxes

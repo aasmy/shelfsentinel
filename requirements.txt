@@ -8,3 +8,4 @@ python-dotenv
 langgraph
 streamlit
 imageio-ffmpeg
+git+https://github.com/ultralytics/CLIP.git  # for yolo-world auto zones

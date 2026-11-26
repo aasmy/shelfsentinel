@@ -4,6 +4,7 @@ __pycache__/
 .env
 .idea/
 configs/zones.yaml
+configs/zones_live.yaml
 
 data/*
 !data/.gitkeep

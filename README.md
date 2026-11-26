@@ -62,3 +62,22 @@ Measures what the proposal promises: thefts caught (recall), normal visits wrong
    `--run` runs the pipeline and agent for videos that weren't run yet, `--baseline` adds the one-call baseline (1 LLM call per video). Results are cached per video so running it again doesn't spend quota (`--rerun` redoes them). Use `--no-llm` for a dry run.
 
 3. Results: tables in the terminal (overall, by actor, by scenario) and `runs/eval/per_video.csv` + `runs/eval/summary.json` for the report.
+
+## Live mode (webcam)
+
+```
+python scripts/run_live.py
+```
+
+Camera on the left with people, skeletons and the zones, and a side panel with the status (waiting / recording / checking), the events as they happen and the latest case. A visit starts when someone walks in and ends when nobody has been in view for 3 seconds (or after `person_exited`). The agent then checks that visit in the background, so the camera keeps running, and the case shows up in the panel and on the dashboard (`streamlit run src/shelfsentinel/dashboard/app.py` in another terminal). Press `q` to stop; the last visit still gets checked.
+
+**Zones are found automatically** the first time (or with `--auto-zones`), so you dont have to redraw them when the room changes:
+- `--auto-zones gemini`: one Gemini call on a frame (faces blurred), most accurate
+- `--auto-zones yolo`: YOLO-World on the laptop, free and offline but less reliable
+- on the zones screen: `enter` use them, `g` try Gemini, `y` try YOLO-World, `m` draw all by hand
+- fix one zone if something is off: `1` shelf / `2` counter / `3` exit (or click it) to select, drag a corner or the middle, `r` redraw it, `d` delete it, `u` undo, `c` cancel all edits
+- press `e` during live mode to edit the current zones without detecting them again
+- press `z` during live mode to find them again after moving the camera
+- they're saved to `configs/zones_live.yaml` and reused next time
+
+Other options: `--camera 1`, `--no-llm` (no Gemini calls for the cases), `--max-calls` per visit (default 3), `--source data/x.mp4 --no-show` to test with a video. Every visit is saved in `runs/live/<visit>/` (video, events, zones) so live sessions can be labelled and used in the evaluation too.

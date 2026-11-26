@@ -188,3 +188,21 @@ def test_clips_are_h264_when_ffmpeg_is_available(tmp_path):
         assert codec in ("avc1", "h264")
     finally:
         captured.release()
+
+
+def test_unchecked_case_still_gets_clips_and_full_visit(tmp_path):
+    source = make_video(tmp_path / "source.mp4", frame_count=50, fps=5.0)  # 10s
+    events = [
+        {"track_id": 1, "event": "hand_reach_shelf", "t": 1.0, "llm_call": True},
+        {"track_id": 1, "event": "hand_leaves_shelf", "t": 1.5},
+        {"track_id": 1, "event": "hand_reach_shelf", "t": 5.0, "llm_call": True},
+        {"track_id": 1, "event": "hand_leaves_shelf", "t": 5.5},
+        {"track_id": 1, "event": "hand_to_body", "t": 6.5},
+    ]
+
+    clips = create_case_clips(source, 1, 1, events, [], runs_dir=tmp_path / "runs", full_visit=True,
+                              max_unchecked=1)
+
+    kinds = [c["event_type"] for c in clips]
+    assert kinds == ["full_visit", "shelf_interaction"]
+    assert clips[1]["start_time"] == 3.0  # the reach followed by hand_to_body was picked
