@@ -99,7 +99,29 @@ def fit(img, height=VIEW_H):
     return cv2.resize(img, (int(w * scale), height), interpolation=cv2.INTER_AREA)
 
 
-def panel(height, status, timer, events, case, zones_source, hint, help_lines=None):
+LIVE_BUTTONS = [("end_visit", "END VISIT", ORANGE), ("edit_zones", "EDIT ZONES", BLUE), ("stop", "STOP", RED)]
+SETUP_BUTTONS = [("start", "START", GREEN), ("quit", "QUIT", RED)]
+
+
+def button_rects(buttons, height, x0=0):
+    """where each button is, in panel coords (or canvas coords with x0 = camera view width)"""
+    gap, top, bottom = 10, height - 120, height - 70
+    width = (PANEL_W - 48 - gap * (len(buttons) - 1)) / len(buttons)
+    rects = {}
+    for i, (name, _, _) in enumerate(buttons):
+        x1 = int(x0 + 24 + i * (width + gap))
+        rects[name] = (x1, top, int(x1 + width), bottom)
+    return rects
+
+
+def draw_buttons(p, buttons):
+    for (name, label, color), (x1, y1, x2, y2) in zip(buttons, button_rects(buttons, p.shape[0]).values()):
+        cv2.rectangle(p, (x1, y1), (x2, y2), color, -1, AA)
+        (w, h), _ = cv2.getTextSize(label, FONT, 0.55, 1)
+        text(p, label, (x1 + (x2 - x1 - w) // 2, y1 + (y2 - y1 + h) // 2), 0.55, (255, 255, 255), 1)
+
+
+def panel(height, status, timer, events, case, zones_source, hint, help_lines=None, buttons=None):
     p = np.full((height, PANEL_W, 3), BG, np.uint8)
     text(p, "ShelfSentinel", (24, 46), 0.95, TEXT, 2)
     pill(p, "LIVE", (300, 44), RED, 0.55, (255, 255, 255))
@@ -115,6 +137,8 @@ def panel(height, status, timer, events, case, zones_source, hint, help_lines=No
         text(p, "EDIT ZONES", (24, 182), 0.5, MUTED)
         for i, line in enumerate(help_lines):
             text(p, line, (24, 216 + 30 * i), 0.52, YELLOW if i == 0 else TEXT)
+        if buttons:
+            draw_buttons(p, buttons)
         text(p, hint, (24, height - 30), 0.48, MUTED)
         return p
     text(p, "EVENTS", (24, 182), 0.5, MUTED)
@@ -128,19 +152,21 @@ def panel(height, status, timer, events, case, zones_source, hint, help_lines=No
     if not events:
         text(p, "nothing yet", (24, y), 0.5, MUTED)
 
-    card_top = height - 230
+    card_top, card_bottom = height - 320, height - 140
     text(p, "LATEST CASE", (24, card_top - 14), 0.5, MUTED)
-    cv2.rectangle(p, (24, card_top), (PANEL_W - 24, height - 70), CARD, -1, AA)
+    cv2.rectangle(p, (24, card_top), (PANEL_W - 24, card_bottom), CARD, -1, AA)
     if case:
         label, c = SEVERITY_STYLE.get(case["severity"], (case["severity"], GRAY))
-        cv2.rectangle(p, (24, card_top), (32, height - 70), c, -1)
+        cv2.rectangle(p, (24, card_top), (32, card_bottom), c, -1)
         text(p, label, (46, card_top + 32), 0.62, c, 2)
         text(p, f"track #{case['track_id']}", (46, card_top + 58), 0.45, MUTED)
-        for i, line in enumerate(wrap(case["summary"], PANEL_W - 90)[:3]):
+        for i, line in enumerate(wrap(case["summary"], PANEL_W - 90)[:4]):
             text(p, line, (46, card_top + 88 + 24 * i), 0.48, TEXT)
     else:
         text(p, "cases show up here after a visit", (46, card_top + 40), 0.48, MUTED)
 
+    if buttons:
+        draw_buttons(p, buttons)
     text(p, hint, (24, height - 30), 0.48, MUTED)
     return p
 
@@ -158,7 +184,7 @@ def banner(img, lines):
 
 
 def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint, editor=None,
-            banner_lines=None):
+            banner_lines=None, buttons=None):
     view = camera_img.copy()
     view = draw_people(view, result)
     view = draw_zones(view, zones)
@@ -168,7 +194,16 @@ def compose(camera_img, zones, result, status, timer, events, case, zones_source
     if banner_lines:
         view = banner(view, banner_lines)
     help_lines = editor.help_lines() if editor is not None else None
-    return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint, help_lines)])
+    return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint, help_lines,
+                                  buttons)])
+
+
+def clicked_button(buttons, view_w, x, y, height=VIEW_H):
+    """name of the button at canvas position x, y, or None"""
+    for name, (x1, y1, x2, y2) in button_rects(buttons, height, x0=view_w).items():
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return name
+    return None
 
 
 def view_scale(camera_img):

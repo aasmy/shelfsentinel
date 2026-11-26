@@ -8,7 +8,9 @@
 #   python scripts/run_live.py --camera 1 --no-llm     # other camera, no gemini calls for the cases
 #   python scripts/run_live.py --source data/x.mp4 --no-show   # a video file instead of the camera (testing)
 #
-# keys in the window: q = stop (the last visit still gets checked), z = find the zones again, e = edit the zones
+# buttons in the side panel: END VISIT, EDIT ZONES, STOP (click them, they always work)
+# keys in the window: q = stop (the last visit still gets checked), v = end the visit now,
+#   z = find the zones again, e = edit the zones
 #   on the zones screen: enter = use them, g = try gemini, y = try yolo-world, m = draw all by hand
 #   and to fix one zone: 1/2/3 or click to select, drag corners or the middle, r redraw, d delete, u undo, c cancel
 #
@@ -28,7 +30,7 @@ import cv2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from shelfsentinel.live_ui import compose, view_scale
+from shelfsentinel.live_ui import LIVE_BUTTONS, SETUP_BUTTONS, clicked_button, compose, view_scale
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.events import ShelfEventDetector
 from shelfsentinel.perception.zones import load_zones, save_zones
@@ -137,10 +139,13 @@ def setup_zones(cap, method, args, zones=None, detector=None):
 
     editor = ZoneEditor(zones)
     scale = {"s": 1.0, "w": 0}
+    clicked = {"button": None}
 
     def on_mouse(event, x, y, flags, param):
-        if x < scale["w"]:  # clicks on the side panel are ignored
+        if x < scale["w"]:
             editor.on_mouse(event, x / scale["s"], y / scale["s"])
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            clicked["button"] = clicked_button(SETUP_BUTTONS, scale["w"], x, y)
 
     cv2.setMouseCallback(WINDOW, on_mouse)
     try:
@@ -157,10 +162,15 @@ def setup_zones(cap, method, args, zones=None, detector=None):
                      else ["click this window first, then ENTER = start live mode",
                            "wrong zone? 1/2/3 to pick it, then drag corners or r to redraw"])
             img = compose(frame, editor.zones, result, status, "", [], None, message,
-                          "enter start   g gemini   y yolo   m draw all   q quit", editor=editor,
-                          banner_lines=lines)
+                          "enter start   g gemini   y yolo   m draw all", editor=editor,
+                          banner_lines=lines, buttons=SETUP_BUTTONS)
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(30) & 0xFF
+            button, clicked["button"] = clicked["button"], None
+            if button == "start" and editor.drawing is None:
+                key = 13
+            elif button == "quit":
+                sys.exit("stopped")
             if key == 255:
                 continue
             if editor.drawing is not None:
@@ -246,6 +256,15 @@ def main():
     out_dir = ROOT / args.out
     segment, last_seen = None, None
     events, running, latest_case = [], [], None
+    no_new_visit_until = 0.0  # after END VISIT, wait a moment before the next visit starts
+    action = {"name": None, "view_w": 0}
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN and x >= action["view_w"]:
+            action["name"] = clicked_button(LIVE_BUTTONS, action["view_w"], x, y) or action["name"]
+
+    if not args.no_show:
+        cv2.setMouseCallback(WINDOW, on_mouse)
 
     def finish(seg):
         seg.close()
@@ -268,7 +287,7 @@ def main():
             break
         result = detector.track_frame(frame)
 
-        if segment is None and detector.get_people(result, 0.0):
+        if segment is None and time.time() >= no_new_visit_until and detector.get_people(result, 0.0):
             segment = Segment(out_dir, fps, size, zones)  # someone walked in
             events = []
             print(f"[{segment.name}] someone walked in, recording")
@@ -307,34 +326,41 @@ def main():
                 status, timer = f"CHECKING {len(running)}", ""
             else:
                 status, timer = "WAITING", ""
-            if segment is None:
+            if segment is None and time.time() < no_new_visit_until:
+                tip = ["visit ended, checking it - next visit starts in a moment"]
+            elif segment is None:
                 tip = ["waiting for someone to walk in front of the camera"]
             elif not events:
                 tip = ["tracking you - reach into the yellow SHELF area"]
             else:
-                tip = None
+                tip = ["click END VISIT (or step out of view) when the scenario is done"]
             img = compose(frame, zones, result, status, timer, events, latest_case, zones_source,
-                          "q stop   z find zones   e edit zones", banner_lines=tip)
+                          "keys: v end visit  e edit  z find zones  q stop", banner_lines=tip, buttons=LIVE_BUTTONS)
+            action["view_w"] = view_scale(frame)[1]
             cv2.imshow(WINDOW, img)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
+            key = cv2.waitKey(5) & 0xFF
+            name, action["name"] = action["name"], None
+            if name is None:  # keys, upper or lower case
+                name = {ord("q"): "stop", ord("Q"): "stop", 27: "stop", ord("v"): "end_visit", ord("V"): "end_visit",
+                        ord("e"): "edit_zones", ord("E"): "edit_zones", ord("z"): "find_zones",
+                        ord("Z"): "find_zones"}.get(key)
+
+            if name == "stop":
                 break
-            if key == ord("z"):
+            if name == "end_visit" and segment is not None:
+                finish(segment)
+                segment, last_seen = None, None
+                no_new_visit_until = time.time() + 3
+            if name in ("edit_zones", "find_zones"):
                 if segment is not None:  # close the current visit first, zones change from here
                     finish(segment)
                     segment, last_seen = None, None
-                new_zones, source = setup_zones(cap, default_method(args), args, detector=detector)
+                method = None if name == "edit_zones" else default_method(args)
+                new_zones, source = setup_zones(cap, method, args, zones, detector=detector)
                 if "shelf" in new_zones:
                     zones, zones_source = new_zones, source
                     save_zones(zones, str(zones_path))
-            if key == ord("e"):  # fix the current zones by hand, no detection
-                if segment is not None:
-                    finish(segment)
-                    segment, last_seen = None, None
-                new_zones, source = setup_zones(cap, None, args, zones, detector=detector)
-                if "shelf" in new_zones:
-                    zones, zones_source = new_zones, source
-                    save_zones(zones, str(zones_path))
+                cv2.setMouseCallback(WINDOW, on_mouse)
 
     cap.release()
     if segment is not None and segment.frames:

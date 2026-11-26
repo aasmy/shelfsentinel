@@ -69,3 +69,13 @@ def test_redraw_needs_3_points_and_esc_cancels():
 
 def test_help_mentions_missing_zones():
     assert any("missing: exit" in line for line in ZoneEditor(ZONES).help_lines())
+
+
+def test_panel_buttons_can_be_clicked():
+    from shelfsentinel.live_ui import LIVE_BUTTONS, button_rects, clicked_button
+
+    view_w = 960
+    rects = button_rects(LIVE_BUTTONS, 720, x0=view_w)
+    for name, (x1, y1, x2, y2) in rects.items():
+        assert clicked_button(LIVE_BUTTONS, view_w, (x1 + x2) // 2, (y1 + y2) // 2) == name
+    assert clicked_button(LIVE_BUTTONS, view_w, 100, 100) is None  # on the camera view
