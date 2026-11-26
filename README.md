@@ -69,9 +69,13 @@ Measures what the proposal promises: thefts caught (recall), normal visits wrong
 python scripts/run_live.py
 ```
 
-Opens the webcam with detection, zones and events on screen. A visit starts when someone walks in and ends when nobody has been in view for 3 seconds (or after `person_exited`). The agent then checks that visit in the background, so the camera keeps running, and the case shows up on the dashboard (run `streamlit run src/shelfsentinel/dashboard/app.py` in another terminal). Press `q` to stop; the last visit still gets checked.
+Camera on the left with people, skeletons and the zones, and a side panel with the status (waiting / recording / checking), the events as they happen and the latest case. A visit starts when someone walks in and ends when nobody has been in view for 3 seconds (or after `person_exited`). The agent then checks that visit in the background, so the camera keeps running, and the case shows up in the panel and on the dashboard (`streamlit run src/shelfsentinel/dashboard/app.py` in another terminal). Press `q` to stop; the last visit still gets checked.
 
-- Draw the zones for the camera first: record a few seconds, then `python scripts/draw_zones.py <that video>`. Don't move the camera after.
-- `--camera 1` for another camera, `--no-llm` for no Gemini calls, `--max-calls` per visit (default 3).
-- Every visit is saved in `runs/live/<visit>/` (video + events), so live sessions can be labelled and used in the evaluation too.
-- `--source data/x.mp4 --no-show` plays a file as if it was the camera (for testing).
+**Zones are found automatically** the first time (or with `--auto-zones`), so you dont have to redraw them when the room changes:
+- `--auto-zones gemini`: one Gemini call on a frame (faces blurred), most accurate
+- `--auto-zones yolo`: YOLO-World on the laptop, free and offline but less reliable
+- on the zones screen: `enter` use them, `g` try Gemini, `y` try YOLO-World, `m` draw by hand
+- press `z` during live mode to find them again after moving the camera
+- they're saved to `configs/zones_live.yaml` and reused next time
+
+Other options: `--camera 1`, `--no-llm` (no Gemini calls for the cases), `--max-calls` per visit (default 3), `--source data/x.mp4 --no-show` to test with a video. Every visit is saved in `runs/live/<visit>/` (video, events, zones) so live sessions can be labelled and used in the evaluation too.
