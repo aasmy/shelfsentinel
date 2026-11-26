@@ -35,7 +35,8 @@ class CaseState(TypedDict, total=False):
     blur: object  # function frame -> frame
 
     timeline: list
-    reaches: list  # indexes into moments of the reaches worth checking
+    reaches: list  # indexes into moments of the reaches worth checking, flagged ones first
+    flagged: int  # how many reaches were followed by hand_to_body
     unclear: list  # reaches the llm couldnt see clearly, checked again on the second look
     deviation: bool
     attempt: int
@@ -62,8 +63,27 @@ def build_timeline(state):
     normal = bool(reaches) and counter_t and exit_t and max(counter_t) > state["moments"][reaches[-1]]["t"] \
         and max(exit_t) > max(counter_t)
 
-    return {"timeline": timeline, "reaches": reaches, "deviation": bool(reaches) and not normal,
+    # reaches followed by hand_to_body (hand to pocket / bag) go first, so the limited llm calls
+    # are spent on the suspicious moments. the rest are still checked if there are calls left
+    flagged = [i for i in reaches if followed_by_hand_to_body(state["moments"], i)]
+    reaches = flagged + [i for i in reaches if i not in flagged]
+
+    return {"timeline": timeline, "reaches": reaches, "flagged": len(flagged),
+            "deviation": bool(reaches) and not normal,
             "attempt": 0, "llm_calls": 0, "evidence": [], "dropped": [], "clear_view": False}
+
+
+def followed_by_hand_to_body(moments, i, max_len=10.0):
+    """did this person move a hand to their body after this reach, before their next real reach"""
+    reach = moments[i]
+    for m in moments[i + 1:]:
+        if m["track_id"] != reach["track_id"]:
+            continue
+        if m["t"] - reach["t"] > max_len or (m["event"] == "hand_reach_shelf" and m.get("llm_call")):
+            return False
+        if m["event"] == "hand_to_body":
+            return True
+    return False
 
 
 def _normalize(response):
@@ -164,6 +184,8 @@ def decide(state):
     elif state["deviation"] and state["llm_calls"] == 0:
         severity = "inconclusive"
         why = "unusual visit but not checked (no llm calls left)"
+        if state.get("flagged"):
+            why = "hand moved to pocket/bag after the shelf (pose only), not checked by the llm yet"
     elif not state["clear_view"] and state["deviation"]:
         severity = "inconclusive"
         why = "hands not clearly visible, evidence obscured"
@@ -174,6 +196,7 @@ def decide(state):
     lines = [f"{e['frame_time']:.1f}s {e['claim']}: {clean_text(e['what'])}" for e in state["evidence"]]
     summary = why + (". " + " | ".join(lines) if lines else "")
     checks = {"clear_view": state["clear_view"], "item_hidden": hidden, "item_taken": taken,
+              "hand_to_body": state.get("flagged", 0) > 0,
               "counter_visit": counter, "exited": exited, "looks": state["attempt"]}
     return {"severity": severity, "summary": summary, "checks": checks}
 

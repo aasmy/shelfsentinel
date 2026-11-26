@@ -22,6 +22,9 @@ class ShelfEventDetector:
         exit_polygon=None,
         min_frames=3,
         suppression_seconds=3.0,
+        body_window_seconds=5.0,
+        body_x_ratio=0.35,
+        body_y_ratio=0.25,
     ):
         self.shelf_polygon = shelf_polygon
         self.counter_polygon = counter_polygon
@@ -32,6 +35,13 @@ class ShelfEventDetector:
         self.counter_states = {}
         self.exit_states = {}
         self.counter_leave_grace_seconds = 0.75
+        # hand_to_body: a wrist at hip height next to the hip (pocket / bag on the hip)
+        # shortly after the hand left the shelf. sizes are relative to the torso length
+        # so it works for people close to or far from the camera
+        self.body_window_seconds = body_window_seconds
+        self.body_x_ratio = body_x_ratio
+        self.body_y_ratio = body_y_ratio
+        self.body_states = {}
 
     def process_frame(self, people, timestamp):
         """Process shelf, counter, and exit state for one complete frame."""
@@ -45,7 +55,9 @@ class ShelfEventDetector:
             track_id = person["track_id"]
             present_ids.add(track_id)
 
-            events.extend(self.update(person, timestamp) or [])
+            shelf_events = self.update(person, timestamp) or []
+            events.extend(shelf_events)
+            events.extend(self._update_hand_to_body(track_id, person, timestamp, shelf_events))
             events.extend(self._update_counter(track_id, person, timestamp))
             events.extend(self._update_exit_presence(track_id, person, timestamp))
 
@@ -175,6 +187,61 @@ class ShelfEventDetector:
                     "llm_call": False,
                 })
         return events
+
+    @staticmethod
+    def wrist_at_hip(keypoints, x_ratio=0.35, y_ratio=0.25):
+        """True if a wrist is next to a hip at hip height (hand at a pocket or a bag on the hip).
+
+        arms hanging by the side put the wrist well below the hip, so they dont count.
+        needs both a shoulder and a hip to know the torso size, otherwise returns False.
+        """
+        shoulders = [keypoints.get(k) for k in ("l_shoulder", "r_shoulder") if keypoints.get(k)]
+        hips = [keypoints.get(k) for k in ("l_hip", "r_hip") if keypoints.get(k)]
+        wrists = [keypoints.get(k) for k in ("l_wrist", "r_wrist") if keypoints.get(k)]
+        if not shoulders or not hips or not wrists:
+            return False
+
+        shoulder_y = sum(p[1] for p in shoulders) / len(shoulders)
+        hip_y = sum(p[1] for p in hips) / len(hips)
+        torso = abs(hip_y - shoulder_y)
+        if torso < 1:
+            return False
+
+        for wx, wy in (w[:2] for w in wrists):
+            for hx, hy in (h[:2] for h in hips):
+                if abs(wx - hx) <= x_ratio * torso and abs(wy - hy) <= y_ratio * torso:
+                    return True
+        return False
+
+    def _update_hand_to_body(self, track_id, person, timestamp, shelf_events):
+        state = self.body_states.setdefault(track_id, {"last_leave": None, "streak": 0, "reported": True})
+
+        for event in shelf_events:
+            if event["event"] == "hand_reach_shelf" and event["llm_call"]:
+                state["reported"] = False  # new real reach, can report again
+            if event["event"] == "hand_leaves_shelf":
+                state["last_leave"] = event["timestamp"]
+
+        hand_in_shelf = self.states.get(track_id, {}).get("inside", False)
+        recent = state["last_leave"] is not None and timestamp - state["last_leave"] <= self.body_window_seconds
+        at_hip = self.wrist_at_hip(person.get("keypoints", {}), self.body_x_ratio, self.body_y_ratio)
+
+        if state["reported"] or hand_in_shelf or not recent or not at_hip:
+            state["streak"] = 0
+            return []
+
+        state["streak"] += 1
+        if state["streak"] < self.min_frames:
+            return []
+
+        state["reported"] = True
+        return [{
+            "track_id": track_id,
+            "event": "hand_to_body",
+            "timestamp": timestamp,
+            "llm_call": False,
+            "since_leave_s": round(timestamp - state["last_leave"], 2),
+        }]
 
     def update(self, person, timestamp):
         """Return a newly emitted event, or a list of events, for this person frame."""

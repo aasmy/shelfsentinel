@@ -65,6 +65,9 @@ def main():
 
     # one visit = one track that reached into the shelf
     tracks = sorted({m["track_id"] for m in moments if m["event"] == "hand_reach_shelf" and m.get("llm_call")})
+    # people with a hand_to_body event get checked first, so the llm budget goes to them
+    suspicious = {m["track_id"] for m in moments if m["event"] == "hand_to_body"}
+    tracks.sort(key=lambda tid: tid not in suspicious)
     print(f"{len(moments)} events, {len(tracks)} visits with a shelf reach\n")
 
     out_path = Path(args.out or Path("runs") / Path(args.video).stem / "agent_cases.jsonl")
