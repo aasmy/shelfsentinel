@@ -147,7 +147,8 @@ def panel(height, status, timer, events, case, zones_source, hint, help_lines=No
         return p
     text(p, "EVENTS", (24, 182), 0.5, MUTED)
     y = 214
-    for t, track, name in events[-9:]:
+    fits = max(1, (height - 320 - 40 - y) // 32 + 1)  # rows that fit above the latest case card
+    for t, track, name in events[-fits:]:
         label, c = EVENT_STYLE.get(name, (name, MUTED))
         cv2.circle(p, (32, y - 6), 6, c, -1, AA)
         text(p, f"{t:5.1f}s", (48, y), 0.5, MUTED)
