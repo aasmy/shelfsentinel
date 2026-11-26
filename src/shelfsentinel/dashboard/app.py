@@ -232,6 +232,13 @@ def main():
         "All": cases,
         "Reviewed": [c for c in cases if c.get("review") != "pending"],
     }[view]
+    counts = {sev: sum(c["severity"] == sev for c in shown) for sev in SEVERITY_ORDER}
+    severity = st.segmented_control(
+        "Severity", ["All", *SEVERITY_ORDER], default="All", key="severity",
+        format_func=lambda sev: "All" if sev == "All" else f"{SEVERITY_NAMES[sev]} ({counts[sev]})",
+        label_visibility="collapsed") or "All"
+    if severity != "All":
+        shown = [c for c in shown if c["severity"] == severity]
     shown = sorted(shown, key=lambda c: (SEVERITY_ORDER.get(c["severity"], 4), -c["id"]))
 
     if not cases:
