@@ -1,0 +1,5 @@
+video,scenario,actor,theft,zones,notes
+data/visit_001.mp4,normal,A,no,configs/zones.yaml,picks item and pays at the counter
+data/visit_002.mp4,long_browse,B,no,configs/zones.yaml,looks around for a long time then pays
+data/visit_003.mp4,pick_put_back,C,no,configs/zones.yaml,picks item then puts it back and leaves
+data/visit_004.mp4,concealment,A,yes,configs/zones.yaml,item into left pocket and leaves without paying
