@@ -79,3 +79,22 @@ def test_panel_buttons_can_be_clicked():
     for name, (x1, y1, x2, y2) in rects.items():
         assert clicked_button(LIVE_BUTTONS, view_w, (x1 + x2) // 2, (y1 + y2) // 2) == name
     assert clicked_button(LIVE_BUTTONS, view_w, 100, 100) is None  # on the camera view
+
+
+def test_zones_are_kept_inside_the_camera_picture():
+    from shelfsentinel.zone_editor import ZoneEditor, clamp_zones
+
+    zones = {"shelf": [[503, 192], [695, 192], [695, 528], [503, 528]]}
+    assert clamp_zones(zones, 640, 480)["shelf"] == [[503, 192], [639, 192], [639, 479], [503, 479]]
+    editor = ZoneEditor(zones, (640, 480))
+    assert max(x for x, _ in editor.zones["shelf"]) == 639
+
+
+def test_clicks_are_mapped_when_the_window_is_shown_smaller(monkeypatch):
+    import cv2
+    from shelfsentinel import live_ui
+
+    monkeypatch.setattr(cv2, "getWindowImageRect", lambda w: (0, 0, 1224, 648))
+    assert live_ui.window_to_image("w", 612, 324, (1360, 720)) == (680, 360)
+    monkeypatch.setattr(cv2, "getWindowImageRect", lambda w: (0, 0, 1360, 720))
+    assert live_ui.window_to_image("w", 612, 324, (1360, 720)) == (612, 324)

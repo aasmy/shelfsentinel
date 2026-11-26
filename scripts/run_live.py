@@ -30,11 +30,11 @@ import cv2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from shelfsentinel.live_ui import LIVE_BUTTONS, SETUP_BUTTONS, clicked_button, compose, view_scale
+from shelfsentinel.live_ui import LIVE_BUTTONS, SETUP_BUTTONS, clicked_button, compose, view_scale, window_to_image
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.events import ShelfEventDetector
 from shelfsentinel.perception.zones import load_zones, save_zones
-from shelfsentinel.zone_editor import ZoneEditor
+from shelfsentinel.zone_editor import ZoneEditor, clamp_zones
 
 WINDOW = "ShelfSentinel live"
 RANK = {"L2": 3, "L1": 2, "inconclusive": 1}
@@ -146,11 +146,12 @@ def setup_zones(cap, method, args, zones=None, detector=None):
     if args.no_show:
         return zones, message
 
-    editor = ZoneEditor(zones)
-    scale = {"s": 1.0, "w": 0}
+    editor = ZoneEditor(zones, (frame.shape[1], frame.shape[0]))
+    scale = {"s": 1.0, "w": 0, "size": (0, 0)}
     clicked = {"button": None}
 
     def on_mouse(event, x, y, flags, param):
+        x, y = window_to_image(WINDOW, x, y, scale["size"])
         if x < scale["w"]:
             editor.on_mouse(event, x / scale["s"], y / scale["s"])
         elif event == cv2.EVENT_LBUTTONDOWN:
@@ -173,6 +174,7 @@ def setup_zones(cap, method, args, zones=None, detector=None):
             img = compose(frame, editor.zones, result, status, "", [], None, message,
                           "enter start   g gemini   y yolo   m draw all", editor=editor,
                           banner_lines=lines, buttons=SETUP_BUTTONS)
+            scale["size"] = (img.shape[1], img.shape[0])
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(30) & 0xFF
             button, clicked["button"] = clicked["button"], None
@@ -247,6 +249,9 @@ def main():
     zones_path = ROOT / args.zones
     zones = load_zones(str(zones_path)) if zones_path.exists() and not args.auto_zones else {}
     zones_source = f"from {args.zones}" if zones else ""
+    cam_w, cam_h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if zones and cam_w and cam_h:  # zones saved for another camera size can run off the picture
+        zones = clamp_zones(zones, cam_w, cam_h)
     if "shelf" not in zones:
         zones, zones_source = setup_zones(cap, args.auto_zones or default_method(args), args, detector=detector)
         if "shelf" not in zones:
@@ -272,9 +277,10 @@ def main():
     segment, last_seen = None, None
     events, running, latest_case = [], [], None
     no_new_visit_until = 0.0  # after END VISIT, wait a moment before the next visit starts
-    action = {"name": None, "view_w": 0}
+    action = {"name": None, "view_w": 0, "size": (0, 0)}
 
     def on_mouse(event, x, y, flags, param):
+        x, y = window_to_image(WINDOW, x, y, action["size"])
         if event == cv2.EVENT_LBUTTONDOWN and x >= action["view_w"]:
             action["name"] = clicked_button(LIVE_BUTTONS, action["view_w"], x, y) or action["name"]
 
@@ -357,6 +363,7 @@ def main():
             img = compose(frame, zones, result, status, timer, events, latest_case, zones_source,
                           "keys: v end visit  e edit  z find zones  q stop", banner_lines=tip, buttons=LIVE_BUTTONS)
             action["view_w"] = view_scale(frame)[1]
+            action["size"] = (img.shape[1], img.shape[0])
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(5) & 0xFF
             name, action["name"] = action["name"], None

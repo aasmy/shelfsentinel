@@ -210,3 +210,16 @@ def view_scale(camera_img):
     """how much the camera image is scaled in the window (to map mouse clicks back to camera pixels)"""
     h, w = camera_img.shape[:2]
     return VIEW_H / h, int(w * VIEW_H / h)
+
+
+def window_to_image(window, x, y, image_size):
+    """windows can show the window smaller than the picture (display scaling) and then the mouse
+    positions come in window pixels. map them back to picture pixels."""
+    try:
+        _, _, shown_w, shown_h = cv2.getWindowImageRect(window)
+    except cv2.error:
+        return x, y
+    w, h = image_size
+    if shown_w <= 0 or shown_h <= 0 or (shown_w, shown_h) == (w, h):
+        return x, y
+    return int(x * w / shown_w), int(y * h / shown_h)

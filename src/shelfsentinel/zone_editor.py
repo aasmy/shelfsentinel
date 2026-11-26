@@ -15,13 +15,22 @@ KEY_TO_ZONE = {ord("1"): "shelf", ord("2"): "counter", ord("3"): "exit"}
 HANDLE_RADIUS = 14
 
 
+def clamp_zones(zones, w, h):
+    """keep every corner inside the camera picture, otherwise it hides under the side panel"""
+    return {k: [[min(max(int(x), 0), w - 1), min(max(int(y), 0), h - 1)] for x, y in v] for k, v in zones.items()}
+
+
 class ZoneEditor:
-    def __init__(self, zones):
+    def __init__(self, zones, size=None):
+        self.size = size  # (w, h) of the camera picture, if known
         self.load(zones)
 
     def load(self, zones):
         """new starting point (e.g. after gemini / yolo found zones again)"""
-        self.zones = copy.deepcopy({k: [list(map(int, p)) for p in v] for k, v in zones.items()})
+        zones = {k: [list(map(int, p)) for p in v] for k, v in zones.items()}
+        if self.size:
+            zones = clamp_zones(zones, *self.size)
+        self.zones = copy.deepcopy(zones)
         self.original = copy.deepcopy(self.zones)
         self.history = []
         self.selected = None
@@ -50,6 +59,8 @@ class ZoneEditor:
     # ---- input
     def on_mouse(self, event, x, y):
         x, y = int(x), int(y)
+        if self.size:
+            x, y = min(max(x, 0), self.size[0] - 1), min(max(y, 0), self.size[1] - 1)
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.drawing is not None:
                 self.drawing.append([x, y])
