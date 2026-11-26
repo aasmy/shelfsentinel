@@ -259,10 +259,6 @@ def test_llm_exception_is_recorded_and_not_treated_as_suspicious_evidence(
     assert case["llm_calls"] == len(llm.calls) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="verify() is outside the LLM exception handler and malformed schemas raise",
-)
 def test_malformed_llm_response_returns_inconclusive(synthetic_frames):
     llm = FakeLLM([["not", "a", "response object"]])
 
@@ -347,10 +343,6 @@ def test_two_interleaved_tracks_get_separate_evidence_and_cases(synthetic_frames
     assert track_2["severity"] == "L1"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="an at_counter event on any track sets counter_visit=False for this track",
-)
 def test_other_tracks_counter_event_does_not_change_this_tracks_counter_check(
     synthetic_frames,
 ):
@@ -395,10 +387,6 @@ def test_exit_before_counter_does_not_trigger_normal_visit_filter(
     assert case["checks"]["counter_visit"] is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="clear_view is aggregated across reaches, so one clear reach suppresses retry",
-)
 def test_unclear_reach_is_retried_even_if_another_reach_was_clear(
     synthetic_frames,
 ):

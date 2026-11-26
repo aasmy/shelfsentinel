@@ -36,6 +36,7 @@ class CaseState(TypedDict, total=False):
 
     timeline: list
     reaches: list  # indexes into moments of the reaches worth checking
+    unclear: list  # reaches the llm couldnt see clearly, checked again on the second look
     deviation: bool
     attempt: int
     llm_calls: int
@@ -65,17 +66,34 @@ def build_timeline(state):
             "attempt": 0, "llm_calls": 0, "evidence": [], "dropped": [], "clear_view": False}
 
 
+def _normalize(response):
+    """llms dont always follow the format (gemini sometimes wraps the answer in a list). returns a dict or None."""
+    if isinstance(response, list):
+        response = next((r for r in response if isinstance(r, dict)), None)
+    if not isinstance(response, dict):
+        return None
+    if not isinstance(response.get("claims", []), list):
+        response = {**response, "claims": []}
+    return response
+
+
 def inspect_reaches(state):
-    """check 1 + 2: is the view clear, and did an item get taken / hidden. one llm call per reach."""
+    """check 1 + 2: is the view clear, and did an item get taken / hidden. one llm call per reach.
+
+    first look checks every reach. second look only re-checks the reaches that werent clear,
+    with a wider window and more frames.
+    """
     llm = state.get("llm")
     attempt = state["attempt"] + 1
-    after = 3.0 if attempt == 1 else 6.0  # second look: wider window, more frames
+    after = 3.0 if attempt == 1 else 6.0
     n = 5 if attempt == 1 else 7
+    todo = state["reaches"] if attempt == 1 else state.get("unclear", [])
 
     evidence, dropped = list(state["evidence"]), list(state["dropped"])
     calls, any_clear = state["llm_calls"], state["clear_view"]
+    unclear = []
 
-    for i in state["reaches"]:
+    for i in todo:
         if llm is None or calls >= state.get("max_calls", 3):
             break
         t0, t1 = reach_window(state["moments"], i, after=after)
@@ -88,19 +106,28 @@ def inspect_reaches(state):
         except Exception as e:
             dropped.append({"claim": None, "what": str(e)[:200], "reason": "llm error"})
             continue
+
+        response = _normalize(response)
+        if response is None:
+            dropped.append({"claim": None, "what": "llm answer was not in the expected format", "reason": "bad llm response"})
+            unclear.append(i)
+            continue
+
         kept, bad, clear = verify(response, times)
         evidence += kept
         dropped += bad
         any_clear = any_clear or clear
+        if not clear and not any(k["claim"] == "item_hidden" for k in kept):
+            unclear.append(i)
 
-    return {"attempt": attempt, "llm_calls": calls, "evidence": evidence, "dropped": dropped, "clear_view": any_clear}
+    return {"attempt": attempt, "llm_calls": calls, "evidence": evidence, "dropped": dropped,
+            "clear_view": any_clear, "unclear": unclear}
 
 
 def need_more_data(state):
-    # loop back once with more frames if we couldnt see anything useful the first time
-    hidden = any(e["claim"] == "item_hidden" for e in state["evidence"])
+    # loop back once, only for the reaches we couldnt see clearly the first time
     can_call = state.get("llm") is not None and state["llm_calls"] < state.get("max_calls", 3)
-    if not hidden and not state["clear_view"] and state["attempt"] < 2 and can_call:
+    if state.get("unclear") and state["attempt"] < 2 and can_call:
         return "inspect_reaches"
     return "check_counter"
 
@@ -110,13 +137,12 @@ def check_counter(state):
     timeline = state["timeline"]
     exits = [m["t"] for m in timeline if m["event"] in EXIT_EVENTS]
     counters = [m["t"] for m in timeline if m["event"] == "at_counter"]
-    has_counter_events = any(m["event"] == "at_counter" for m in state["moments"])
-
+    # only this persons own events count, other people at the counter dont change their case
     exited = bool(exits)
     if counters:
         counter_visit = not exits or min(counters) < max(exits)
     else:
-        counter_visit = False if has_counter_events or exited else None  # None = cant tell from this video
+        counter_visit = False if exited else None  # None = still in the store / cant tell yet
     return {"counter_visit": counter_visit, "exited": exited}
 
 
