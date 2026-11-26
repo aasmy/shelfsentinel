@@ -176,6 +176,9 @@ def setup_zones(cap, method, args, zones=None, detector=None):
                           banner_lines=lines, buttons=SETUP_BUTTONS)
             scale["size"] = (img.shape[1], img.shape[0])
             cv2.imshow(WINDOW, img)
+            if not scale.get("hooked"):  # opencv 5 only makes the window on the first imshow
+                cv2.setMouseCallback(WINDOW, on_mouse)
+                scale["hooked"] = True
             key = cv2.waitKey(30) & 0xFF
             button, clicked["button"] = clicked["button"], None
             if button == "start" and editor.drawing is None:
@@ -365,6 +368,9 @@ def main():
             action["view_w"] = view_scale(frame)[1]
             action["size"] = (img.shape[1], img.shape[0])
             cv2.imshow(WINDOW, img)
+            if not action.get("hooked"):  # opencv 5 only makes the window on the first imshow
+                cv2.setMouseCallback(WINDOW, on_mouse)
+                action["hooked"] = True
             key = cv2.waitKey(5) & 0xFF
             name, action["name"] = action["name"], None
             if name is None:  # keys, upper or lower case
