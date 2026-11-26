@@ -40,6 +40,14 @@ def main():
         st.error(f"Could not load cases from {db_path}: {exc}")
         st.stop()
 
+    # L2 = possible concealment and left without the counter, these show up as a notification (proposal)
+    pending_l2 = [c for c in cases if c["severity"] == "L2" and c.get("review") == "pending"]
+    if pending_l2:
+        st.error(
+            f"{len(pending_l2)} L2 case(s) need review: "
+            + ", ".join(f"#{c['id']} (track {c['track_id']})" for c in pending_l2)
+        )
+
     st.subheader("Overview")
     metrics = st.columns(5)
     metrics[0].metric("Total cases", len(cases))
@@ -57,6 +65,9 @@ def main():
         for case in cases
         if severity_filter == "All" or case["severity"] == severity_filter
     ]
+    # most serious first, then the ones nobody reviewed yet
+    rank = {"L2": 0, "L1": 1, "inconclusive": 2, "normal": 3}
+    filtered_cases.sort(key=lambda c: (rank.get(c["severity"], 4), c.get("review") != "pending", -c["id"]))
 
     if not filtered_cases:
         st.info("No cases match this severity.")
@@ -160,7 +171,8 @@ def main():
             if not resolved_path.is_file():
                 st.warning(f"Video evidence file is missing: {clip_path}")
                 continue
-            st.video(str(resolved_path))
+            video_column, _ = st.columns([2, 3])
+            video_column.video(str(resolved_path))
 
     st.markdown("**Dropped claims**")
     if case["dropped"]:
