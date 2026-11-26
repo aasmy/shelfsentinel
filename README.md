@@ -38,3 +38,27 @@ python -m streamlit run src/shelfsentinel/dashboard/app.py
 
 The dashboard defaults to `runs/cases.db`. Enter a different path in the
 sidebar to inspect another database.
+
+## Evaluate
+
+Measures what the proposal promises: thefts caught (recall), normal visits wrongly flagged (false alarm rate) and LLM calls per visit, for the agent and for a baseline that sends 5 fixed frames of the whole video to one LLM call. One labelled video = one visit.
+
+1. Label the videos in a csv like `configs/labels_example.csv`:
+
+   ```
+   video,scenario,actor,theft,zones,notes
+   data/visit_001.mp4,normal,A,no,configs/zones.yaml,picks item and pays at the counter
+   data/visit_004.mp4,concealment,A,yes,configs/zones.yaml,item into left pocket and leaves without paying
+   ```
+
+   `theft` is yes/no. `actor` is a letter per person (no names), used for the bias audit.
+
+2. Run it:
+
+   ```
+   python scripts/evaluate.py --labels data/labels.csv --run --baseline
+   ```
+
+   `--run` runs the pipeline and agent for videos that weren't run yet, `--baseline` adds the one-call baseline (1 LLM call per video). Results are cached per video so running it again doesn't spend quota (`--rerun` redoes them). Use `--no-llm` for a dry run.
+
+3. Results: tables in the terminal (overall, by actor, by scenario) and `runs/eval/per_video.csv` + `runs/eval/summary.json` for the report.
