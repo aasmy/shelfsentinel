@@ -62,3 +62,16 @@ Measures what the proposal promises: thefts caught (recall), normal visits wrong
    `--run` runs the pipeline and agent for videos that weren't run yet, `--baseline` adds the one-call baseline (1 LLM call per video). Results are cached per video so running it again doesn't spend quota (`--rerun` redoes them). Use `--no-llm` for a dry run.
 
 3. Results: tables in the terminal (overall, by actor, by scenario) and `runs/eval/per_video.csv` + `runs/eval/summary.json` for the report.
+
+## Live mode (webcam)
+
+```
+python scripts/run_live.py
+```
+
+Opens the webcam with detection, zones and events on screen. A visit starts when someone walks in and ends when nobody has been in view for 3 seconds (or after `person_exited`). The agent then checks that visit in the background, so the camera keeps running, and the case shows up on the dashboard (run `streamlit run src/shelfsentinel/dashboard/app.py` in another terminal). Press `q` to stop; the last visit still gets checked.
+
+- Draw the zones for the camera first: record a few seconds, then `python scripts/draw_zones.py <that video>`. Don't move the camera after.
+- `--camera 1` for another camera, `--no-llm` for no Gemini calls, `--max-calls` per visit (default 3).
+- Every visit is saved in `runs/live/<visit>/` (video + events), so live sessions can be labelled and used in the evaluation too.
+- `--source data/x.mp4 --no-show` plays a file as if it was the camera (for testing).
