@@ -16,6 +16,18 @@ from shelfsentinel.dashboard.data import (
 from shelfsentinel.storage.db import DEFAULT_DB, REVIEW_STATUSES
 
 
+@st.fragment(run_every="4s")
+def watch_for_new_cases(db_path, shown):
+    """runs by itself every few seconds, reloads the page when a new case shows up (live mode)"""
+    try:
+        current = len(load_cases(db_path)[0])
+    except Exception:
+        return
+    if current != shown:
+        st.session_state["new_cases"] = current - shown
+        st.rerun(scope="app")
+
+
 def main():
     st.set_page_config(page_title="ShelfSentinel Cases", layout="wide")
     st.title("ShelfSentinel Case Review")
@@ -33,12 +45,18 @@ def main():
             value=os.environ.get("SHELF_SENTINEL_DB", DEFAULT_DB),
             help="Defaults to runs/cases.db. Relative paths use the current directory.",
         )
+        auto_refresh = st.toggle("Live updates", value=True, help="Check for new cases every few seconds")
 
     try:
         cases, counts = load_cases(db_path)
     except Exception as exc:
         st.error(f"Could not load cases from {db_path}: {exc}")
         st.stop()
+
+    if auto_refresh:
+        watch_for_new_cases(db_path, len(cases))
+    if st.session_state.pop("new_cases", 0):
+        st.toast("New case from the camera")
 
     # L2 = possible concealment and left without the counter, these show up as a notification (proposal)
     pending_l2 = [c for c in cases if c["severity"] == "L2" and c.get("review") == "pending"]
