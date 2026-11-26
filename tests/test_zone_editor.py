@@ -98,3 +98,14 @@ def test_clicks_are_mapped_when_the_window_is_shown_smaller(monkeypatch):
     assert live_ui.window_to_image("w", 612, 324, (1360, 720)) == (680, 360)
     monkeypatch.setattr(cv2, "getWindowImageRect", lambda w: (0, 0, 1360, 720))
     assert live_ui.window_to_image("w", 612, 324, (1360, 720)) == (612, 324)
+
+
+def test_edit_buttons_sit_above_start_and_quit():
+    from shelfsentinel.live_ui import EDIT_BUTTONS, SETUP_BUTTONS, button_rects, clicked_button
+
+    edit = button_rects(EDIT_BUTTONS, 720, x0=960, row=1)["delete"]
+    start = button_rects(SETUP_BUTTONS, 720, x0=960)["start"]
+    assert edit[3] < start[1]
+    x, y = (edit[0] + edit[2]) // 2, (edit[1] + edit[3]) // 2
+    assert clicked_button(EDIT_BUTTONS, 960, x, y, row=1) == "delete"
+    assert clicked_button(SETUP_BUTTONS, 960, x, y) is None

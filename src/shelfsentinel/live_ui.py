@@ -101,11 +101,13 @@ def fit(img, height=VIEW_H):
 
 LIVE_BUTTONS = [("end_visit", "END VISIT", ORANGE), ("edit_zones", "EDIT ZONES", BLUE), ("stop", "STOP", RED)]
 SETUP_BUTTONS = [("start", "START", GREEN), ("quit", "QUIT", RED)]
+EDIT_BUTTONS = [("redraw", "REDRAW", BLUE), ("delete", "DELETE", ORANGE), ("undo", "UNDO", GRAY)]  # row above
 
 
-def button_rects(buttons, height, x0=0):
-    """where each button is, in panel coords (or canvas coords with x0 = camera view width)"""
-    gap, top, bottom = 10, height - 120, height - 70
+def button_rects(buttons, height, x0=0, row=0):
+    """where each button is, in panel coords (or canvas coords with x0 = camera view width).
+    row 0 is the bottom row, row 1 the one above it"""
+    gap, top, bottom = 10, height - 120 - 65 * row, height - 70 - 65 * row
     width = (PANEL_W - 48 - gap * (len(buttons) - 1)) / len(buttons)
     rects = {}
     for i, (name, _, _) in enumerate(buttons):
@@ -114,14 +116,14 @@ def button_rects(buttons, height, x0=0):
     return rects
 
 
-def draw_buttons(p, buttons):
-    for (name, label, color), (x1, y1, x2, y2) in zip(buttons, button_rects(buttons, p.shape[0]).values()):
+def draw_buttons(p, buttons, row=0):
+    for (name, label, color), (x1, y1, x2, y2) in zip(buttons, button_rects(buttons, p.shape[0], row=row).values()):
         cv2.rectangle(p, (x1, y1), (x2, y2), color, -1, AA)
         (w, h), _ = cv2.getTextSize(label, FONT, 0.55, 1)
         text(p, label, (x1 + (x2 - x1 - w) // 2, y1 + (y2 - y1 + h) // 2), 0.55, (255, 255, 255), 1)
 
 
-def panel(height, status, timer, events, case, zones_source, hint, help_lines=None, buttons=None):
+def panel(height, status, timer, events, case, zones_source, hint, help_lines=None, buttons=None, edit_buttons=None):
     p = np.full((height, PANEL_W, 3), BG, np.uint8)
     text(p, "ShelfSentinel", (24, 46), 0.95, TEXT, 2)
     pill(p, "LIVE", (300, 44), RED, 0.55, (255, 255, 255))
@@ -139,6 +141,8 @@ def panel(height, status, timer, events, case, zones_source, hint, help_lines=No
             text(p, line, (24, 216 + 30 * i), 0.52, YELLOW if i == 0 else TEXT)
         if buttons:
             draw_buttons(p, buttons)
+        if edit_buttons:
+            draw_buttons(p, edit_buttons, row=1)
         text(p, hint, (24, height - 30), 0.48, MUTED)
         return p
     text(p, "EVENTS", (24, 182), 0.5, MUTED)
@@ -184,7 +188,7 @@ def banner(img, lines):
 
 
 def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint, editor=None,
-            banner_lines=None, buttons=None):
+            banner_lines=None, buttons=None, edit_buttons=None):
     view = camera_img.copy()
     view = draw_people(view, result)
     view = draw_zones(view, zones)
@@ -195,12 +199,12 @@ def compose(camera_img, zones, result, status, timer, events, case, zones_source
         view = banner(view, banner_lines)
     help_lines = editor.help_lines() if editor is not None else None
     return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint, help_lines,
-                                  buttons)])
+                                  buttons, edit_buttons)])
 
 
-def clicked_button(buttons, view_w, x, y, height=VIEW_H):
+def clicked_button(buttons, view_w, x, y, height=VIEW_H, row=0):
     """name of the button at canvas position x, y, or None"""
-    for name, (x1, y1, x2, y2) in button_rects(buttons, height, x0=view_w).items():
+    for name, (x1, y1, x2, y2) in button_rects(buttons, height, x0=view_w, row=row).items():
         if x1 <= x <= x2 and y1 <= y <= y2:
             return name
     return None

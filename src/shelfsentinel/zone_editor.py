@@ -140,7 +140,7 @@ class ZoneEditor:
         if self.drawing is not None:
             return [f"drawing {self.selected.upper()}",
                     "click the corners",
-                    "enter  finish",
+                    "START or enter  finish",
                     "backspace  remove last point",
                     "esc  cancel"]
         sel = self.selected.upper() if self.selected else "none"
@@ -149,8 +149,8 @@ class ZoneEditor:
                  "1 shelf   2 counter   3 exit",
                  "click a zone to select it",
                  "drag a corner / drag inside to move",
-                 "r redraw   d delete   u undo",
+                 "REDRAW / DELETE / UNDO buttons (r d u)",
                  "c cancel all edits"]
         if missing:
-            lines.append("missing: " + ", ".join(missing) + " (select + r)")
+            lines.append("missing: " + ", ".join(missing) + " (press 2/3, then REDRAW)")
         return lines

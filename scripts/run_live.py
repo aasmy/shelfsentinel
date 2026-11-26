@@ -30,7 +30,7 @@ import cv2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from shelfsentinel.live_ui import LIVE_BUTTONS, SETUP_BUTTONS, clicked_button, compose, view_scale, window_to_image
+from shelfsentinel.live_ui import EDIT_BUTTONS, LIVE_BUTTONS, SETUP_BUTTONS, clicked_button, compose, view_scale, window_to_image
 from shelfsentinel.perception.detector import PoseDetector
 from shelfsentinel.perception.events import ShelfEventDetector
 from shelfsentinel.perception.zones import load_zones, save_zones
@@ -155,7 +155,8 @@ def setup_zones(cap, method, args, zones=None, detector=None):
         if x < scale["w"]:
             editor.on_mouse(event, x / scale["s"], y / scale["s"])
         elif event == cv2.EVENT_LBUTTONDOWN:
-            clicked["button"] = clicked_button(SETUP_BUTTONS, scale["w"], x, y)
+            clicked["button"] = (clicked_button(SETUP_BUTTONS, scale["w"], x, y)
+                                 or clicked_button(EDIT_BUTTONS, scale["w"], x, y, row=1))
 
     cv2.setMouseCallback(WINDOW, on_mouse)
     try:
@@ -168,12 +169,13 @@ def setup_zones(cap, method, args, zones=None, detector=None):
             status = "SETUP" if "shelf" in editor.zones else "SETUP  no shelf"
             # show the skeleton here too, so you can see its tracking you before starting
             result = detector.track_frame(frame, args.imgsz) if detector is not None else None
-            lines = (["click a corner to place it, ENTER = done, ESC = cancel"] if editor.drawing is not None
+            lines = (["click the corners, then START (or ENTER) = done, ESC = cancel"] if editor.drawing is not None
                      else ["click this window first, then ENTER = start live mode",
-                           "wrong zone? 1/2/3 to pick it, then drag corners or r to redraw"])
+                           "wrong zone? click it (or 1/2/3), then drag corners or use the buttons"])
             img = compose(frame, editor.zones, result, status, "", [], None, message,
                           "enter start   g gemini   y yolo   m draw all", editor=editor,
-                          banner_lines=lines, buttons=SETUP_BUTTONS)
+                          banner_lines=lines, buttons=SETUP_BUTTONS,
+                          edit_buttons=None if editor.drawing is not None else EDIT_BUTTONS)
             scale["size"] = (img.shape[1], img.shape[0])
             cv2.imshow(WINDOW, img)
             if not scale.get("hooked"):  # opencv 5 only makes the window on the first imshow
@@ -181,10 +183,12 @@ def setup_zones(cap, method, args, zones=None, detector=None):
                 scale["hooked"] = True
             key = cv2.waitKey(30) & 0xFF
             button, clicked["button"] = clicked["button"], None
-            if button == "start" and editor.drawing is None:
+            if button == "start":  # start live mode, or finish the zone being drawn
                 key = 13
             elif button == "quit":
                 sys.exit("stopped")
+            elif button in ("redraw", "delete", "undo") and editor.drawing is None:
+                key = ord(button[0])  # same as pressing r / d / u
             if key == 255:
                 continue
             if editor.drawing is not None:
