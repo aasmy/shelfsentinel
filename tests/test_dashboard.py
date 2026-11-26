@@ -71,7 +71,8 @@ def test_dashboard_renders_cases_with_and_without_clips(tmp_path, monkeypatch):
     assert not app.exception
     assert any("No video clips are available" in item.value for item in app.markdown)
 
-    app.selectbox[1].set_value(clip_case_id).run()
+    app.session_state["selected_case_id"] = clip_case_id  # same as clicking its row in the table
+    app.run()
     assert not app.exception
     assert any("Checkout" in item.value for item in app.markdown)
     assert len(app.get("video")) == 1
@@ -79,6 +80,34 @@ def test_dashboard_renders_cases_with_and_without_clips(tmp_path, monkeypatch):
         "Video evidence file is missing" in item.value for item in app.warning
     )
 
-    app.selectbox[1].set_value(no_clip_case_id).run()
+    app.session_state["selected_case_id"] = no_clip_case_id
+    app.run()
     assert not app.exception
     assert any("No video clips are available" in item.value for item in app.markdown)
+
+
+def test_review_buttons_save_the_decision(tmp_path, monkeypatch):
+    database_path = tmp_path / "cases.db"
+    conn = connect(database_path)
+    try:
+        with conn:
+            case_id = save_case(conn, _case(severity="L2"))
+    finally:
+        conn.close()
+    monkeypatch.chdir(tmp_path)
+    app_path = Path(__file__).resolve().parents[1] / "src" / "shelfsentinel" / "dashboard" / "app.py"
+
+    app = AppTest.from_file(str(app_path)).run()
+    app.text_input[0].set_value(str(database_path)).run()
+    assert not app.exception
+    assert not app.selectbox  # no dropdowns anymore
+    app.button(key=f"review-confirmed-{case_id}").click().run()
+    assert not app.exception
+
+    from shelfsentinel.storage.db import list_cases
+
+    conn = connect(database_path)
+    try:
+        assert list_cases(conn)[0]["review"] == "confirmed"
+    finally:
+        conn.close()

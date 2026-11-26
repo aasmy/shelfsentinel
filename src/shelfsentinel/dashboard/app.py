@@ -13,7 +13,7 @@ from shelfsentinel.dashboard.data import (
     load_cases,
     update_review,
 )
-from shelfsentinel.storage.db import DEFAULT_DB, REVIEW_STATUSES
+from shelfsentinel.storage.db import DEFAULT_DB
 
 
 @st.fragment(run_every="4s")
@@ -26,6 +26,29 @@ def watch_for_new_cases(db_path, shown):
     if current != shown:
         st.session_state["new_cases"] = current - shown
         st.rerun(scope="app")
+
+
+REVIEW_LABELS = {"confirmed": "Confirm", "false_alarm": "False alarm", "pending": "Pending"}
+
+
+def review_buttons(case, db_path):
+    """three plain buttons instead of a dropdown + save"""
+    current = case.get("review", "pending")
+    st.markdown(f"**Review:** {REVIEW_LABELS.get(current, current)}")
+    columns = st.columns([1, 1, 1, 3])
+    for column, value in zip(columns, ("confirmed", "false_alarm", "pending")):
+        if column.button(REVIEW_LABELS[value], key=f"review-{value}-{case['id']}", disabled=current == value,
+                         use_container_width=True):
+            try:
+                updated = update_review(db_path, case["id"], value)
+            except Exception as exc:
+                st.error(f"Could not update review status: {exc}")
+            else:
+                if updated:
+                    st.toast(f"Case #{case['id']}: {REVIEW_LABELS[value].lower()}")
+                    st.rerun()
+                else:
+                    st.error("Case no longer exists in the selected database.")
 
 
 def main():
@@ -76,46 +99,70 @@ def main():
         st.info("No cases are stored in this database yet.")
         return
 
-    severity_options = ["All"] + sorted(counts)
-    severity_filter = st.selectbox("Filter by severity", severity_options)
+    filter_columns = st.columns(2)
+    severity_filter = filter_columns[0].segmented_control(
+        "Severity", ["All", "L2", "L1", "inconclusive", "normal"], default="All", key="severity_filter",
+    ) or "All"
+    review_filter = filter_columns[1].segmented_control(
+        "Review", ["All", "pending", "confirmed", "false_alarm"], default="All", key="review_filter",
+    ) or "All"
     filtered_cases = [
         case
         for case in cases
-        if severity_filter == "All" or case["severity"] == severity_filter
+        if (severity_filter == "All" or case["severity"] == severity_filter)
+        and (review_filter == "All" or case.get("review") == review_filter)
     ]
     # most serious first, then the ones nobody reviewed yet
     rank = {"L2": 0, "L1": 1, "inconclusive": 2, "normal": 3}
     filtered_cases.sort(key=lambda c: (rank.get(c["severity"], 4), c.get("review") != "pending", -c["id"]))
 
     if not filtered_cases:
-        st.info("No cases match this severity.")
+        st.info("No cases match these filters.")
         return
 
-    labels = {
-        case["id"]: (
-            f"#{case['id']} · {case['severity']} · "
-            f"{case['video']} · track {case['track_id']}"
-        )
-        for case in filtered_cases
-    }
-    selected_id = st.selectbox(
-        "Select a case",
-        options=list(labels),
-        format_func=labels.__getitem__,
+    # click a row to open the case
+    table = st.dataframe(
+        [
+            {
+                "ID": case["id"],
+                "Severity": case["severity"],
+                "Review": case.get("review", "pending"),
+                "Track": case["track_id"],
+                "Video": Path(str(case["video"])).name,
+                "Time": str(case["created_at"])[:16].replace("T", " "),
+                "Summary": case["summary"],
+            }
+            for case in filtered_cases
+        ],
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        height=min(38 + 35 * len(filtered_cases), 300),
+        key="case_table",
     )
+    selected_rows = table.selection.rows if table is not None else []
+    if selected_rows:
+        st.session_state["selected_case_id"] = filtered_cases[selected_rows[0]]["id"]
+    ids = [c["id"] for c in filtered_cases]
+    selected_id = st.session_state.get("selected_case_id")
+    if selected_id not in ids:
+        selected_id = ids[0]
     case = next(item for item in filtered_cases if item["id"] == selected_id)
+    st.caption("Click a row to open that case.")
 
     st.subheader(f"Case #{case['id']}")
     detail_columns = st.columns(3)
     detail_columns[0].write(f"**Date/time:** {case['created_at']}")
-    detail_columns[1].write(f"**Video:** {case['video']}")
+    detail_columns[1].write(f"**Video:** {Path(str(case['video'])).name}")
     detail_columns[2].write(f"**Track ID:** {case['track_id']}")
     detail_columns[0].write(f"**Severity:** {case['severity']}")
     detail_columns[1].write(f"**LLM calls:** {case['llm_calls']}")
-    detail_columns[2].write(f"**Review:** {case['review']}")
 
     st.markdown("**Summary**")
     st.write(case["summary"])
+
+    review_buttons(case, db_path)
 
     checks = case["checks"]
     st.markdown("**Counter and exit checks**")
@@ -127,14 +174,10 @@ def main():
 
     st.markdown("**Accepted evidence**")
     if case["evidence"]:
-        for index, evidence in enumerate(case["evidence"], start=1):
+        for evidence in sorted(case["evidence"], key=lambda e: e.get("frame_time") or 0):
             frame_time = evidence.get("frame_time")
-            label = f"{index}. {evidence.get('claim', 'claim')}"
-            if frame_time is not None:
-                label += f" · frame time {frame_time}s"
-            with st.expander(label):
-                st.write(evidence.get("what", ""))
-                st.json(evidence)
+            when = f"{frame_time}s" if frame_time is not None else "?"
+            st.markdown(f"- **{when}** · {evidence.get('claim', 'claim')}: {evidence.get('what', '')}")
     else:
         st.write("No accepted evidence.")
 
@@ -193,40 +236,13 @@ def main():
             video_column, _ = st.columns([2, 3])
             video_column.video(str(resolved_path))
 
-    st.markdown("**Dropped claims**")
-    if case["dropped"]:
-        for index, dropped in enumerate(case["dropped"], start=1):
-            label = (
-                f"{index}. {dropped.get('claim') or 'response'} · "
-                f"{dropped.get('reason', 'no reason recorded')}"
-            )
-            with st.expander(label):
-                st.write(dropped.get("what", ""))
-                st.json(dropped)
-    else:
-        st.write("No dropped claims.")
-
-    st.markdown("**Update human review**")
-    review_options = sorted(REVIEW_STATUSES)
-    current_review = case.get("review", "pending")
-    review_index = review_options.index(current_review)
-    new_review = st.selectbox(
-        "Review status",
-        review_options,
-        index=review_index,
-        key=f"review-{case['id']}",
-    )
-    if st.button("Save review status"):
-        try:
-            updated = update_review(db_path, case["id"], new_review)
-        except Exception as exc:
-            st.error(f"Could not update review status: {exc}")
+    with st.expander(f"Dropped claims ({len(case['dropped'])})"):
+        if case["dropped"]:
+            for dropped in case["dropped"]:
+                st.markdown(f"- {dropped.get('claim') or 'response'} · _{dropped.get('reason', 'no reason recorded')}_: "
+                            f"{str(dropped.get('what', ''))[:200]}")
         else:
-            if updated:
-                st.success("Review status saved.")
-                st.rerun()
-            else:
-                st.error("Case no longer exists in the selected database.")
+            st.write("No dropped claims.")
 
     pending_delete_key = "pending_delete_case_id"
     if st.button("Delete Case", key=f"delete-case-{case['id']}"):
