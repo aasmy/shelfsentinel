@@ -2,7 +2,7 @@
 # usage: python scripts/run_pipeline.py --video data/test.mp4
 #        python scripts/run_pipeline.py --video data/test.mp4 --no-llm   (just find the moments, no api calls)
 # python scripts/run_pipeline.py --video data/public/clips/1_3_crop.mp4
-# python scripts/run_pipeline.py --video data/public/clips/test_vid4.mp4
+# python scripts/run_pipeline.py --video data/public/clips/test_vid4.mp4 --zones configs/zones_test_vid4.yaml
 # saves runs/<video>/cases.jsonl
 
 import argparse
@@ -75,7 +75,7 @@ def main():
     parser.add_argument("--video", required=True)
     parser.add_argument("--zones", default="configs/zones.yaml")
     parser.add_argument("--out", default="runs")
-    parser.add_argument("--max-calls", type=int, default=100, help="max gemini calls per run, to save quota")
+    parser.add_argument("--max-calls", type=int, default=10, help="max gemini calls per run, to save quota")
     parser.add_argument("--no-llm", action="store_true")
     parser.add_argument("--delay", type=float, default=10, help="seconds between gemini calls (free tier is 5 per minute)")
     args = parser.parse_args()

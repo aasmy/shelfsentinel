@@ -4,7 +4,7 @@
 #   python scripts/run_pipeline.py --video data/test.mp4 --no-llm
 # step 2 (agent, uses the events from step 1):
 #   python scripts/run_agent.py --video data/test.mp4 --max-calls 5
-# python scripts/run_agent.py --video data/public/clips/1_3_crop.mp4 --max-calls 20
+# python scripts/run_agent.py --video data/public/clips/test_vid4.mp4 --max-calls 20
 #   python scripts/run_agent.py --video data/test.mp4 --no-llm      (timeline + counter check only)
 
 import argparse

@@ -50,11 +50,11 @@ class ProviderManager:
 
     # -- main entry point --------------------------------------------------
 
-    def process_frames(self, prompt, frames, batch_size=1, on_result=None):
+    def process_frames(self, prompt, frames, batch_size=3, on_result=None):
         """
         Work through `frames` in order and return one result per batch.
 
-        A provider keeps going until it errors. The failed batch and everything
+        A provider keeps going until it runs into an error. The failed batch and everything
         after it is then handed to the next available provider.
 
         batch_size: frames per request (1 = one request per frame).
@@ -109,4 +109,4 @@ class ProviderManager:
 
     def ask_with_images(self, prompt, frames):
         """Single request with all frames, with failover (the old behaviour)."""
-        return self.process_frames(prompt, frames, batch_size=len(frames))[0]
+        return self.process_frames(prompt, frames)[0]
