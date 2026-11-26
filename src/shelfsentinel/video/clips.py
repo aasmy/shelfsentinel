@@ -3,6 +3,7 @@
 import logging
 import math
 import os
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -20,6 +21,40 @@ def _event_time(event):
 
 def extract_video_clip(video_path, start_time, end_time, output_path):
     """Write a source-video interval to MP4 and return its actual frame bounds."""
+    info = _write_clip(video_path, start_time, end_time, output_path)
+    info["browser_playable"] = _make_browser_playable(Path(output_path))
+    return info
+
+
+def _make_browser_playable(path):
+    """Re-encode the clip as H.264.
+
+    opencv writes mp4v, which browsers (and discord/streamlit) cant play, they only show one frame.
+    imageio-ffmpeg ships its own ffmpeg so this works on windows too. if it fails we keep the mp4v file,
+    it still plays after downloading.
+    """
+    try:
+        import imageio_ffmpeg
+
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as exc:
+        logger.warning("ffmpeg not available, clip stays mp4v: %s", exc)
+        return False
+
+    tmp = path.with_name(path.stem + ".h264.mp4")
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", str(path), "-c:v", "libx264", "-preset", "veryfast",
+           "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(tmp)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        os.replace(tmp, path)
+        return True
+    except Exception as exc:
+        logger.warning("could not re-encode %s to h264: %s", path, exc)
+        tmp.unlink(missing_ok=True)
+        return False
+
+
+def _write_clip(video_path, start_time, end_time, output_path):
     for value in (start_time, end_time):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("clip timestamps must be finite numbers")
