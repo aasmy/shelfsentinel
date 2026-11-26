@@ -45,3 +45,10 @@ def test_clean_text_removes_appearance():
     out = clean_text("The woman, wearing a grey jacket, puts a white box in her bag")
     assert "woman" not in out and "jacket" not in out
     assert "white box" in out
+
+
+def test_text_booleans_and_frames_are_read_correctly():
+    kept, dropped, clear = verify({"clear_view": "false", "claims": [
+        {"claim": "item_hidden", "frame": "2", "what": "puts it in a pocket"}]}, TIMES)
+    assert clear is False
+    assert kept == [] and dropped[0]["reason"] == "view not clear"
