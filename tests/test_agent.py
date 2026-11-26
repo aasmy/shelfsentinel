@@ -85,3 +85,29 @@ def test_no_llm_gives_inconclusive(video):
     moments = [ev("hand_reach_shelf", 2.0, True), ev("person_exited", 12.0)]
     case = run_case(video, 1, moments, llm=None, graph=GRAPH)
     assert case["severity"] == "inconclusive" and case["llm_calls"] == 0
+
+
+def test_reach_followed_by_hand_to_body_is_checked_first(video):
+    moments = [ev("hand_reach_shelf", 1.0, True), ev("hand_leaves_shelf", 1.5),
+               ev("hand_reach_shelf", 4.0, True), ev("hand_leaves_shelf", 4.5), ev("hand_to_body", 5.5),
+               ev("person_exited", 12.0)]
+
+    class Recorder(FakeLLM):
+        def ask_with_images(self, prompt, frames):
+            self.first_prompt = getattr(self, "first_prompt", prompt)
+            return super().ask_with_images(prompt, frames)
+
+    llm = Recorder([HIDDEN])
+    case = run_case(video, 1, moments, llm=llm, max_calls=1, graph=GRAPH)
+    assert llm.calls == 1
+    assert "3.5" in llm.first_prompt  # window of the second reach (starts 0.5s before 4.0)
+    assert case["severity"] == "L2"
+    assert case["checks"]["hand_to_body"] is True
+
+
+def test_hand_to_body_without_llm_says_so(video):
+    moments = [ev("hand_reach_shelf", 2.0, True), ev("hand_leaves_shelf", 2.5), ev("hand_to_body", 3.0),
+               ev("person_exited", 12.0)]
+    case = run_case(video, 1, moments, llm=None, graph=GRAPH)
+    assert case["severity"] == "inconclusive"
+    assert "pocket/bag" in case["summary"]
