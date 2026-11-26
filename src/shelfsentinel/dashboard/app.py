@@ -144,6 +144,7 @@ def main():
         st.write("No video clips are available for this case.")
     else:
         clip_titles = {
+            "full_visit": "Whole Visit",
             "shelf_interaction": "Shelf Interaction",
             "checkout": "Checkout",
             "exit": "Exit",

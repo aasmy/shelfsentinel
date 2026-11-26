@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--per-case", type=int, default=3, help="max llm calls per visit")
     parser.add_argument("--delay", type=float, default=13)
     parser.add_argument("--no-llm", action="store_true")
+    parser.add_argument("--full-visit", action="store_true", help="also save the whole visit as a clip (live mode)")
     args = parser.parse_args()
 
     events_path = Path(args.events or Path("runs") / Path(args.video).stem / "cases.jsonl")
@@ -101,6 +102,7 @@ def main():
                         tid,
                         moments,
                         case["evidence"],
+                        **({"full_visit": True} if args.full_visit else {}),
                     )
                 update_case_video_clips(conn, db_id, clips)
                 case["video_clips"] = clips

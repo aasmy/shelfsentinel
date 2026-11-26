@@ -220,6 +220,8 @@ def create_case_clips(
     events,
     evidence,
     runs_dir="runs",
+    full_visit=False,
+    max_unchecked=3,
 ):
     """Create clips justified by accepted evidence and matching track events.
 
@@ -286,6 +288,38 @@ def create_case_clips(
             )
         )
 
+    # no evidence (llm not used or out of calls): still show the suspicious reaches so the owner can look.
+    # reaches followed by hand_to_body first
+    if not used_interactions and interaction_pairs:
+        body_times = sorted(
+            t for t in (
+                _event_time(e) for e in events
+                if e.get("track_id") == track_id and e.get("event") == "hand_to_body"
+            ) if t is not None
+        )
+
+        # each hand_to_body belongs to the last reach before it
+        flagged = set()
+        for t in body_times:
+            before = [i for i, (reach_time, _) in enumerate(interaction_pairs) if reach_time <= t]
+            if before:
+                flagged.add(max(before, key=lambda i: interaction_pairs[i][0]))
+
+        order = sorted(range(len(interaction_pairs)), key=lambda i: (i not in flagged, i))
+        for index in sorted(order[:max_unchecked]):
+            reach_time, leave_time = interaction_pairs[index]
+            clips.append(
+                _create_clip_metadata(
+                    video_path,
+                    track_id,
+                    "shelf_interaction",
+                    reach_time - 2.0,
+                    leave_time + 3.0,
+                    output_dir / f"shelf_interaction_{index + 1}.mp4",
+                    {"hand_reach_shelf": reach_time, "hand_leaves_shelf": leave_time},
+                )
+            )
+
     for index, (counter_time, leave_time) in enumerate(
         _checkout_visits(events, track_id), start=1
     ):
@@ -336,7 +370,25 @@ def create_case_clips(
                 {"person_exited": exit_time},
             )
         )
+
+    # live visits are short, so keep the whole visit as one video too
+    if full_visit:
+        duration = _video_duration(video_path)
+        if duration and duration <= 180:
+            clips.insert(0, _create_clip_metadata(
+                video_path, track_id, "full_visit", 0.0, duration, output_dir / "full_visit.mp4", {},
+            ))
     return [clip for clip in clips if clip is not None]
+
+
+def _video_duration(video_path):
+    capture = cv2.VideoCapture(str(video_path))
+    try:
+        fps = capture.get(cv2.CAP_PROP_FPS) or 0
+        frames = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        return frames / fps if fps else None
+    finally:
+        capture.release()
 
 
 def _create_clip_metadata(

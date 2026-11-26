@@ -74,7 +74,7 @@ def check_visit(segment, args):
         return None
     cmd = [sys.executable, str(ROOT / "scripts" / "run_agent.py"), "--video", str(segment.video),
            "--events", str(segment.dir / "cases.jsonl"), "--out", str(segment.dir / "agent_cases.jsonl"),
-           "--db", args.db, "--max-calls", str(args.max_calls)]
+           "--db", args.db, "--max-calls", str(args.max_calls), "--full-visit"]
     if args.no_llm:
         cmd.append("--no-llm")
     print(f"[{segment.name}] visit over ({segment.t:.1f}s, {len(segment.events)} events), checking it...")
