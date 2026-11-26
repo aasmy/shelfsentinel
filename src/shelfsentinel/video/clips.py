@@ -374,7 +374,7 @@ def create_case_clips(
     # live visits are short, so keep the whole visit as one video too
     if full_visit:
         duration = _video_duration(video_path)
-        if duration and duration <= 180:
+        if duration and duration <= 900:
             clips.insert(0, _create_clip_metadata(
                 video_path, track_id, "full_visit", 0.0, duration, output_dir / "full_visit.mp4", {},
             ))

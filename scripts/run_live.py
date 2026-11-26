@@ -82,6 +82,15 @@ def check_visit(segment, args):
     return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
 
 
+def main_person(people):
+    """the biggest person in view, always as track 1, so id switches dont split the visit"""
+    if not people:
+        return []
+    person = max(people, key=lambda p: (p.bbox[2] - p.bbox[0]) * (p.bbox[3] - p.bbox[1]))
+    person.track_id = 1
+    return [person]
+
+
 def default_method(args):
     return "yolo" if args.no_llm or not os.getenv("GEMINI_API_KEY") else "gemini"
 
@@ -157,7 +166,7 @@ def setup_zones(cap, method, args, zones=None, detector=None):
             scale["s"], scale["w"] = view_scale(frame)
             status = "SETUP" if "shelf" in editor.zones else "SETUP  no shelf"
             # show the skeleton here too, so you can see its tracking you before starting
-            result = detector.track_frame(frame) if detector is not None else None
+            result = detector.track_frame(frame, args.imgsz) if detector is not None else None
             lines = (["click a corner to place it, ENTER = done, ESC = cancel"] if editor.drawing is not None
                      else ["click this window first, then ENTER = start live mode",
                            "wrong zone? 1/2/3 to pick it, then drag corners or r to redraw"])
@@ -212,6 +221,11 @@ def main():
     parser.add_argument("--idle", type=float, default=3.0, help="seconds with nobody in view that end a visit")
     parser.add_argument("--fps", type=float, default=0, help="recording fps (default: measured)")
     parser.add_argument("--no-show", action="store_true", help="dont open a window (for testing)")
+    parser.add_argument("--imgsz", type=int, default=416,
+                        help="detection size, smaller = faster on a cpu (yolo default is 640)")
+    parser.add_argument("--multi-person", action="store_true",
+                        help="track everyone separately. by default live mode follows one person (the biggest in "
+                             "view) so the tracker switching ids doesnt split one visit into many cases")
     args = parser.parse_args()
 
     cap = cv2.VideoCapture(args.source if args.source else args.camera)
@@ -223,8 +237,9 @@ def main():
     size = (frame.shape[1], frame.shape[0])
 
     if not args.no_show:
-        cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-        cv2.resizeWindow(WINDOW, 1280, 720)
+        # fixed size window: if the window gets stretched, opencv 5 on windows doesnt map mouse clicks back
+        # to the picture, so the buttons and the zone editor miss
+        cv2.namedWindow(WINDOW, cv2.WINDOW_AUTOSIZE)
 
     detector = PoseDetector()
 
@@ -248,7 +263,7 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-            detector.track_frame(frame)
+            detector.track_frame(frame, args.imgsz)
             n += 1
         fps = max(2.0, round(n / (time.time() - start), 1))
     print(f"running at {fps} fps. zones: {', '.join(zones)}. press q in the window to stop")
@@ -281,11 +296,14 @@ def main():
         if cases:
             latest_case = max(cases, key=lambda c: RANK.get(c["severity"], 0))
 
+    frame_times = []
     while True:
         ok, frame = cap.read()
         if not ok:
             break
-        result = detector.track_frame(frame)
+        result = detector.track_frame(frame, args.imgsz)
+        frame_times = (frame_times + [time.time()])[-20:]
+        live_fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0
 
         if segment is None and time.time() >= no_new_visit_until and detector.get_people(result, 0.0):
             segment = Segment(out_dir, fps, size, zones)  # someone walked in
@@ -295,6 +313,8 @@ def main():
         if segment is not None:
             t = segment.t
             people = detector.get_people(result, t)
+            if not args.multi_person:
+                people = main_person(people)
             segment.writer.write(frame)
             segment.frames += 1
             for event in segment.detector.process_frame(people, round(t, 3)):
@@ -321,11 +341,11 @@ def main():
 
         if not args.no_show:
             if segment is not None:
-                status, timer = "RECORDING", f"{segment.t:5.1f}s"
+                status, timer = "RECORDING", f"{segment.t:5.1f}s  {live_fps:.0f} fps"
             elif running:
-                status, timer = f"CHECKING {len(running)}", ""
+                status, timer = f"CHECKING {len(running)}", f"{live_fps:.0f} fps"
             else:
-                status, timer = "WAITING", ""
+                status, timer = "WAITING", f"{live_fps:.0f} fps"
             if segment is None and time.time() < no_new_visit_until:
                 tip = ["visit ended, checking it - next visit starts in a moment"]
             elif segment is None:
