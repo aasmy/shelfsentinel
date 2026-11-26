@@ -74,7 +74,7 @@ def test_dashboard_renders_cases_with_and_without_clips(tmp_path, monkeypatch):
     app.session_state["selected_case_id"] = clip_case_id  # same as clicking its row in the table
     app.run()
     assert not app.exception
-    assert any("Checkout" in item.value for item in app.markdown)
+    assert any(tab.label == "Checkout" for tab in app.tabs)
     assert len(app.get("video")) == 1
     assert not any(
         "Video evidence file is missing" in item.value for item in app.warning
