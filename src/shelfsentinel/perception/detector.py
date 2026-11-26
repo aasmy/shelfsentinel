@@ -43,6 +43,17 @@ class PoseDetector:
             verbose=False,
         )
 
+    def track_frame(self, frame):
+        # same as track() but for one frame at a time (live camera), ids stay the same across calls
+        return self.model.track(
+            source=frame,
+            persist=True,
+            tracker=self.tracker,
+            conf=self.conf,
+            classes=[0],
+            verbose=False,
+        )[0]
+
     def get_people(self, result, t):
         # turns one yolo result into a list of Person
         boxes = result.boxes
