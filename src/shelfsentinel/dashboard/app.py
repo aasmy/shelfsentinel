@@ -137,16 +137,20 @@ def delete_section(case, db_path):
 
 
 def show_case(case, db_path, waiting_view):
+    st.subheader(f"Case #{case['id']}")
     show_videos(case)
 
     # what happened
     severity = SEVERITY_NAMES.get(case["severity"], case["severity"])
     finding = str(case["summary"]).split(". ")[0]
     st.markdown(f"#### {severity} – {finding}")
-    st.caption(
-        f"Track {case['track_id']} · {Path(str(case['video'])).name} · "
-        f"{str(case['created_at'])[:16].replace('T', ' ')} · {REVIEW_NAMES.get(case.get('review'), case.get('review'))}"
-    )
+    details = st.columns(3)
+    details[0].markdown(f"**Date/time:** {str(case['created_at'])[:16].replace('T', ' ')}")
+    details[1].markdown(f"**Video:** {Path(str(case['video'])).name}")
+    details[2].markdown(f"**Track ID:** {case['track_id']}")
+    details[0].markdown(f"**Severity:** {severity}")
+    details[1].markdown(f"**LLM calls:** {case['llm_calls']}")
+    details[2].markdown(f"**Review:** {REVIEW_NAMES.get(case.get('review'), case.get('review'))}")
     evidence = sorted(case.get("evidence") or [], key=lambda e: e.get("frame_time") or 0)
     for item in evidence:
         t = item.get("frame_time")
@@ -217,6 +221,11 @@ def main():
     title.markdown("### ShelfSentinel")
     view = choice.segmented_control("Show", ["Waiting", "All", "Reviewed"], default="Waiting",
                                     key="view", label_visibility="collapsed") or "Waiting"
+    # L2 = possible concealment and left without the counter, these show up as a notification (proposal)
+    pending_l2 = [c for c in waiting if c["severity"] == "L2"]
+    if pending_l2:
+        st.error(f"{len(pending_l2)} L2 case(s) need review: "
+                 + ", ".join(f"#{c['id']} (track {c['track_id']})" for c in pending_l2))
 
     shown = {
         "Waiting": waiting,
@@ -249,7 +258,7 @@ def main():
         st.session_state.pop("selected_case_id", None)
         st.rerun()
     label.markdown(
-        f"<div style='text-align:center;padding-top:6px'>Case {position + 1} of {len(shown)}"
+        f"<div style='text-align:center;padding-top:6px'><b>Case #{case['id']}</b> · {position + 1} of {len(shown)}"
         f" · {len(waiting)} waiting</div>",
         unsafe_allow_html=True,
     )
