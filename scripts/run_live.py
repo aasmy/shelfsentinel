@@ -100,6 +100,13 @@ def find_zones(frame, method):
     except Exception as e:
         return {}, f"{method} failed: {str(e)[:60]}"
     missing = [n for n in ("shelf", "counter", "exit") if n not in zones]
+    if "shelf" not in zones:  # nothing usable, start from simple default zones so live mode can still start
+        from shelfsentinel.perception.auto_zones import default_zones
+
+        found = zones
+        zones = default_zones(frame.shape[1], frame.shape[0])
+        zones.update({k: v for k, v in found.items() if k != "shelf"})
+        return zones, "no shelf found, using default zones"
     return zones, f"found by {method}" + (f", missing {', '.join(missing)}" if missing else "")
 
 
@@ -113,7 +120,7 @@ def draw_by_hand(frame):
     return load_zones(str(path)) if path.exists() else {}
 
 
-def setup_zones(cap, method, args, zones=None):
+def setup_zones(cap, method, args, zones=None, detector=None):
     """find the zones on the current camera view (or start from the given ones when method is None),
     then let the user fix them before using them"""
     ok, frame = cap.read()
@@ -144,8 +151,14 @@ def setup_zones(cap, method, args, zones=None):
                     frame = live
             scale["s"], scale["w"] = view_scale(frame)
             status = "SETUP" if "shelf" in editor.zones else "SETUP  no shelf"
-            img = compose(frame, editor.zones, None, status, "", [], None, message,
-                          "enter use   g gemini   y yolo   m draw all   q quit", editor=editor)
+            # show the skeleton here too, so you can see its tracking you before starting
+            result = detector.track_frame(frame) if detector is not None else None
+            lines = (["click a corner to place it, ENTER = done, ESC = cancel"] if editor.drawing is not None
+                     else ["click this window first, then ENTER = start live mode",
+                           "wrong zone? 1/2/3 to pick it, then drag corners or r to redraw"])
+            img = compose(frame, editor.zones, result, status, "", [], None, message,
+                          "enter start   g gemini   y yolo   m draw all   q quit", editor=editor,
+                          banner_lines=lines)
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(30) & 0xFF
             if key == 255:
@@ -203,19 +216,20 @@ def main():
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(WINDOW, 1280, 720)
 
+    detector = PoseDetector()
+
     # zones: from the file, or found automatically
     zones_path = ROOT / args.zones
     zones = load_zones(str(zones_path)) if zones_path.exists() and not args.auto_zones else {}
     zones_source = f"from {args.zones}" if zones else ""
     if "shelf" not in zones:
-        zones, zones_source = setup_zones(cap, args.auto_zones or default_method(args), args)
+        zones, zones_source = setup_zones(cap, args.auto_zones or default_method(args), args, detector=detector)
         if "shelf" not in zones:
             sys.exit(f"no shelf zone found ({zones_source}). try --auto-zones gemini, or draw them by hand")
         zones_path.parent.mkdir(parents=True, exist_ok=True)
         save_zones(zones, str(zones_path))
         print(f"zones saved to {args.zones}")
 
-    detector = PoseDetector()
     print("warming up...")
     fps = args.fps or (cap.get(cv2.CAP_PROP_FPS) if args.source else 0)
     if not fps:  # recording fps = how fast we actually process frames
@@ -293,8 +307,14 @@ def main():
                 status, timer = f"CHECKING {len(running)}", ""
             else:
                 status, timer = "WAITING", ""
+            if segment is None:
+                tip = ["waiting for someone to walk in front of the camera"]
+            elif not events:
+                tip = ["tracking you - reach into the yellow SHELF area"]
+            else:
+                tip = None
             img = compose(frame, zones, result, status, timer, events, latest_case, zones_source,
-                          "q stop   z find zones   e edit zones")
+                          "q stop   z find zones   e edit zones", banner_lines=tip)
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -303,7 +323,7 @@ def main():
                 if segment is not None:  # close the current visit first, zones change from here
                     finish(segment)
                     segment, last_seen = None, None
-                new_zones, source = setup_zones(cap, default_method(args), args)
+                new_zones, source = setup_zones(cap, default_method(args), args, detector=detector)
                 if "shelf" in new_zones:
                     zones, zones_source = new_zones, source
                     save_zones(zones, str(zones_path))
@@ -311,7 +331,7 @@ def main():
                 if segment is not None:
                     finish(segment)
                     segment, last_seen = None, None
-                new_zones, source = setup_zones(cap, None, args, zones)
+                new_zones, source = setup_zones(cap, None, args, zones, detector=detector)
                 if "shelf" in new_zones:
                     zones, zones_source = new_zones, source
                     save_zones(zones, str(zones_path))

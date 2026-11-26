@@ -134,3 +134,17 @@ def find_zones_yolo(frame, model=None, conf=0.05):
         for c, s, b in zip(result.boxes.cls, result.boxes.conf, result.boxes.xyxy)
     ]
     return boxes_to_zones(pick_yolo_boxes(detections), width, height), detections
+
+
+def default_zones(width, height):
+    """simple starting zones when nothing was found, so live mode can always start: shelf on the right,
+    counter at the bottom middle, exit on the left edge. meant to be fixed on the zones screen."""
+    w, h = width, height
+    return {
+        "shelf": [[int(0.68 * w), int(0.15 * h)], [int(0.98 * w), int(0.15 * h)],
+                  [int(0.98 * w), int(0.85 * h)], [int(0.68 * w), int(0.85 * h)]],
+        "counter": [[int(0.30 * w), int(0.80 * h)], [int(0.62 * w), int(0.80 * h)],
+                    [int(0.62 * w), int(0.99 * h)], [int(0.30 * w), int(0.99 * h)]],
+        "exit": [[int(0.01 * w), int(0.55 * h)], [int(0.12 * w), int(0.55 * h)],
+                 [int(0.12 * w), int(0.99 * h)], [int(0.01 * w), int(0.99 * h)]],
+    }

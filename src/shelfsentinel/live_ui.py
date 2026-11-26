@@ -145,13 +145,28 @@ def panel(height, status, timer, events, case, zones_source, hint, help_lines=No
     return p
 
 
-def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint, editor=None):
+def banner(img, lines):
+    """big dark bar at the top of the camera view with instructions"""
+    pad, line_h = 14, 40
+    h = pad * 2 + line_h * len(lines)
+    overlay = img.copy()
+    cv2.rectangle(overlay, (0, 0), (img.shape[1], h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.65, img, 0.35, 0, img)
+    for i, line in enumerate(lines):
+        text(img, line, (pad + 6, pad + 28 + line_h * i), 0.8, YELLOW if i == 0 else TEXT, 2)
+    return img
+
+
+def compose(camera_img, zones, result, status, timer, events, case, zones_source, hint, editor=None,
+            banner_lines=None):
     view = camera_img.copy()
     view = draw_people(view, result)
     view = draw_zones(view, zones)
     if editor is not None:
         view = editor.draw_handles(view)
     view = fit(view)
+    if banner_lines:
+        view = banner(view, banner_lines)
     help_lines = editor.help_lines() if editor is not None else None
     return np.hstack([view, panel(view.shape[0], status, timer, events, case, zones_source, hint, help_lines)])
 
