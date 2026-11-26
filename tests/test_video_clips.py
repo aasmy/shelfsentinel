@@ -155,3 +155,36 @@ def test_case_clips_skip_unmatched_shelf_and_checkout_events(tmp_path):
     )
 
     assert clips == []
+
+
+def test_hidden_evidence_gets_a_clip_using_the_last_leave(tmp_path):
+    source = make_video(tmp_path / "source.mp4", frame_count=50, fps=5.0)
+    events = [
+        {"track_id": 1, "event": "hand_reach_shelf", "t": 2.0, "llm_call": True},
+        {"track_id": 1, "event": "hand_leaves_shelf", "t": 2.1},  # flicker on the zone edge
+        {"track_id": 1, "event": "hand_reach_shelf", "t": 2.2, "llm_call": False},
+        {"track_id": 1, "event": "hand_leaves_shelf", "t": 4.0},  # real leave
+    ]
+    evidence = [{"claim": "item_hidden", "frame_time": 6.5, "what": "puts it in a pocket"}]
+
+    clips = create_case_clips(source, 1, 1, events, evidence, runs_dir=tmp_path / "runs")
+
+    assert len(clips) == 1
+    assert clips[0]["start_time"] == 0.0
+    assert clips[0]["end_time"] == 4.0 + 3.0
+
+
+def test_clips_are_h264_when_ffmpeg_is_available(tmp_path):
+    pytest.importorskip("imageio_ffmpeg")
+    source = make_video(tmp_path / "source.mp4")
+    output = tmp_path / "clip.mp4"
+
+    metadata = extract_video_clip(source, 1.0, 2.0, output)
+
+    assert metadata["browser_playable"] is True
+    captured = cv2.VideoCapture(str(output))
+    try:
+        codec = int(captured.get(cv2.CAP_PROP_FOURCC)).to_bytes(4, "little").decode().lower()
+        assert codec in ("avc1", "h264")
+    finally:
+        captured.release()

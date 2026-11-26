@@ -169,13 +169,17 @@ def _shelf_interactions(events, track_id):
         reach_time = _event_time(event)
         if reach_time is None:
             continue
+        # same as the agent's frame window: the wrist flickers on the zone edge, so use the last
+        # leave before the next real reach (within 10s), not the first one
         leave_event = None
         for following in track_events[index + 1 :]:
-            if following.get("event") == "hand_reach_shelf":
+            following_time = _event_time(following)
+            if following_time is not None and following_time - reach_time > 10.0:
+                break
+            if following.get("event") == "hand_reach_shelf" and following.get("llm_call"):
                 break
             if following.get("event") == "hand_leaves_shelf":
                 leave_event = following
-                break
         leave_time = _event_time(leave_event) if leave_event else None
         if leave_time is not None and leave_time >= reach_time:
             interactions.append((reach_time, leave_time))
@@ -227,8 +231,11 @@ def create_case_clips(
     output_dir = Path(runs_dir) / f"case_{case_id}"
     used_interactions = set()
     interaction_pairs = _shelf_interactions(events, track_id)
+    # any shelf claim gets a clip, item_hidden is the one that matters most
     taken_evidence = [
-        claim for claim in evidence if claim.get("claim") == "item_taken"
+        claim
+        for claim in evidence
+        if claim.get("claim") in {"item_taken", "item_hidden", "item_put_back"}
     ]
 
     for claim in taken_evidence:
