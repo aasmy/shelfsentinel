@@ -2,7 +2,7 @@
 
 import re
 
-ALLOWED_CLAIMS = {"item_taken", "item_put_back", "item_hidden"}
+ALLOWED_CLAIMS = {"item_taken", "item_put_back", "item_hidden", "item_taken_out"}
 
 # llm is guessing, not seeing
 HEDGE_WORDS = re.compile(r"\b(appears?|appearing|seems?|seemingly|presumably|likely|possibly|probably|suggest\w*|may|might|could)\b", re.I)
