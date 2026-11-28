@@ -237,7 +237,7 @@ def create_case_clips(
     taken_evidence = [
         claim
         for claim in evidence
-        if claim.get("claim") in {"item_taken", "item_hidden", "item_put_back"}
+        if claim.get("claim") in {"item_taken", "item_hidden", "item_put_back", "item_taken_out"}
     ]
 
     for claim in taken_evidence:

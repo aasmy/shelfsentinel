@@ -17,12 +17,14 @@ from shelfsentinel.dashboard.data import (
     load_cases,
     update_review,
 )
+from shelfsentinel.dashboard.upload import upload_section
 from shelfsentinel.storage.db import DEFAULT_DB
 
 SEVERITY_ORDER = {"L2": 0, "L1": 1, "inconclusive": 2, "normal": 3}
 SEVERITY_NAMES = {"L2": "L2", "L1": "L1", "inconclusive": "Inconclusive", "normal": "Normal"}
 REVIEW_NAMES = {"pending": "waiting for review", "confirmed": "confirmed", "false_alarm": "false alarm"}
-CLAIM_NAMES = {"item_taken": "took an item", "item_hidden": "hid an item", "item_put_back": "put an item back"}
+CLAIM_NAMES = {"item_taken": "took an item", "item_hidden": "hid an item", "item_put_back": "put an item back",
+               "item_taken_out": "took an item back out"}
 CLIP_TITLES = {
     "full_visit": "Whole visit",
     "shelf_interaction": "Shelf reach",
@@ -221,6 +223,7 @@ def main():
     title.markdown("### ShelfSentinel")
     view = choice.segmented_control("Show", ["Waiting", "All", "Reviewed"], default="Waiting",
                                     key="view", label_visibility="collapsed") or "Waiting"
+    upload_section(db_path)
     # L2 = possible concealment and left without the counter, these show up as a notification (proposal)
     pending_l2 = [c for c in waiting if c["severity"] == "L2"]
     if pending_l2:
@@ -242,7 +245,7 @@ def main():
     shown = sorted(shown, key=lambda c: (SEVERITY_ORDER.get(c["severity"], 4), -c["id"]))
 
     if not cases:
-        st.info("No cases yet. They show up here when the camera or the agent finds something.")
+        st.info("No cases yet. Analyze a video above, or run live mode.")
         return
     if not shown:
         if view == "Waiting":

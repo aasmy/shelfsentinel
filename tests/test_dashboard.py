@@ -111,3 +111,17 @@ def test_review_buttons_save_the_decision(tmp_path, monkeypatch):
         assert list_cases(conn)[0]["review"] == "confirmed"
     finally:
         conn.close()
+
+
+def test_upload_helpers():
+    from shelfsentinel.dashboard.upload import analyze_command, case_line, progress_lines, safe_name
+
+    assert safe_name("../my store clip (1).MOV") == "my_store_clip_1.mov"
+    assert safe_name("evil.exe") == "evil.mp4"
+    cmd = analyze_command("data/uploads/a.mp4", "yolo", "runs/cases.db", use_llm=False)
+    assert cmd[cmd.index("--auto-zones") + 1] == "yolo" and "--no-llm" in cmd
+    cmd = analyze_command("data/uploads/a.mp4", "configs/zones.yaml", "runs/cases.db", use_llm=True, zones_only=True)
+    assert cmd[cmd.index("--zones") + 1] == "configs/zones.yaml" and "--zones-only" in cmd and "--no-llm" not in cmd
+    assert case_line("case 2 (db 7)  track 4   L1           calls=1  item taken") == "Case #7 · L1 · item taken"
+    log = "1) zones\n... 30s\nsome noise\ncase 1 (db 3)  track 4  normal  calls=0  ok\ndone\n"
+    assert progress_lines(log) == ["1) zones", "case 1 (db 3)  track 4  normal  calls=0  ok", "done"]

@@ -100,7 +100,8 @@ def test_reach_followed_by_hand_to_body_is_checked_first(video):
     llm = Recorder([HIDDEN])
     case = run_case(video, 1, moments, llm=llm, max_calls=1, graph=GRAPH)
     assert llm.calls == 1
-    assert "3.5" in llm.first_prompt  # window of the second reach (starts 0.5s before 4.0)
+    # the two reaches are close together, so one call sees both (0.5s .. 3s after the last leave)
+    assert "[0.5," in llm.first_prompt and "7.5]" in llm.first_prompt
     assert case["severity"] == "L2"
     assert case["checks"]["hand_to_body"] is True
 
