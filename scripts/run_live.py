@@ -97,28 +97,9 @@ def default_method(args):
 
 def find_zones(frame, method):
     """returns (zones, message)"""
-    try:
-        if method == "gemini":
-            from shelfsentinel.llm.gemini import Gemini
-            from shelfsentinel.perception.auto_zones import find_zones_gemini
-            from shelfsentinel.privacy.blur import blur_faces
+    from shelfsentinel.perception.auto_zones import find_zones_with
 
-            zones, _ = find_zones_gemini(frame, Gemini(), blur=blur_faces)
-        else:
-            from shelfsentinel.perception.auto_zones import find_zones_yolo
-
-            zones, _ = find_zones_yolo(frame)
-    except Exception as e:
-        return {}, f"{method} failed: {str(e)[:60]}"
-    missing = [n for n in ("shelf", "counter", "exit") if n not in zones]
-    if "shelf" not in zones:  # nothing usable, start from simple default zones so live mode can still start
-        from shelfsentinel.perception.auto_zones import default_zones
-
-        found = zones
-        zones = default_zones(frame.shape[1], frame.shape[0])
-        zones.update({k: v for k, v in found.items() if k != "shelf"})
-        return zones, "no shelf found, using default zones"
-    return zones, f"found by {method}" + (f", missing {', '.join(missing)}" if missing else "")
+    return find_zones_with(frame, method)
 
 
 def draw_by_hand(frame):

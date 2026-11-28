@@ -148,3 +148,26 @@ def default_zones(width, height):
         "exit": [[int(0.01 * w), int(0.55 * h)], [int(0.12 * w), int(0.55 * h)],
                  [int(0.12 * w), int(0.99 * h)], [int(0.01 * w), int(0.99 * h)]],
     }
+
+
+def find_zones_with(frame, method):
+    """gemini or yolo, falls back to default zones when no shelf is found. returns (zones, message)"""
+    try:
+        if method == "gemini":
+            from shelfsentinel.llm.gemini import Gemini
+            from shelfsentinel.privacy.blur import blur_faces
+
+            zones, _ = find_zones_gemini(frame, Gemini(), blur=blur_faces)
+        else:
+            zones, _ = find_zones_yolo(frame)
+    except Exception as e:
+        zones, failed = {}, f"{method} failed: {str(e)[:60]}"
+    else:
+        failed = None
+    if "shelf" not in zones:  # nothing usable, start from simple default zones so the run can still go on
+        found = zones
+        zones = default_zones(frame.shape[1], frame.shape[0])
+        zones.update({k: v for k, v in found.items() if k != "shelf"})
+        return zones, (failed + ", " if failed else "") + "no shelf found, using default zones"
+    missing = [n for n in ("shelf", "counter", "exit") if n not in zones]
+    return zones, f"found by {method}" + (f", missing {', '.join(missing)}" if missing else "")
